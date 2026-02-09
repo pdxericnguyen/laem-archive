@@ -7,6 +7,7 @@ type OrderStatus = "paid" | "shipped" | "stock_conflict" | string;
 type OrderRow = {
   id: string;
   slug?: string | null;
+  items?: Array<{ slug?: string; quantity?: number }>;
   email?: string | null;
   created?: number | null;
   quantity?: number;
@@ -57,6 +58,19 @@ function formatMoney(amountTotal?: number | null, currency?: string | null) {
   }
   const code = String(currency || "usd").toUpperCase();
   return `${(amountTotal / 100).toFixed(2)} ${code}`;
+}
+
+function itemSummary(row: OrderRow) {
+  if (Array.isArray(row.items) && row.items.length > 0) {
+    return row.items
+      .map((item) => {
+        const parsed = Number(item.quantity ?? 1);
+        const safeQuantity = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 1;
+        return `${item.slug || "-"} x${safeQuantity}`;
+      })
+      .join(", ");
+  }
+  return row.slug || "-";
 }
 
 function toStatusLabel(status?: OrderStatus) {
@@ -372,7 +386,7 @@ function OrderCard({
     <div className="border border-neutral-200 p-4 space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-sm font-medium">{row.slug || "-"}</div>
+          <div className="text-sm font-medium">{itemSummary(row)}</div>
           <div className="text-xs text-neutral-600">
             {row.email || "-"} | {formatDate(row.created)} | qty {row.quantity ?? "-"} |{" "}
             {formatMoney(row.amount_total, row.currency)}

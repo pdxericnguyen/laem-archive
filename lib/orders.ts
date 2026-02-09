@@ -15,12 +15,18 @@ export type OrderConflictResolution = {
   resolvedAt: number;
 };
 
+export type OrderLineItem = {
+  slug: string;
+  quantity: number;
+};
+
 export type OrderRecord = {
   id: string;
   slug: string | null;
   email: string | null;
   created: number;
   quantity: number;
+  items?: OrderLineItem[];
   status: OrderStatus;
   amount_total: number | null;
   currency: string | null;
@@ -41,6 +47,7 @@ type LooseOrderRecord = {
   amount_total?: unknown;
   amountTotal?: unknown;
   currency?: unknown;
+  items?: Array<{ slug?: unknown; quantity?: unknown }> | null;
   shipping?: {
     carrier?: unknown;
     trackingNumber?: unknown;
@@ -112,6 +119,32 @@ function normalizeConflictResolution(
   };
 }
 
+function normalizeLineItems(value: LooseOrderRecord["items"]) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const items = value
+    .map((row) => {
+      if (!row || typeof row !== "object") {
+        return null;
+      }
+      const item = row as Record<string, unknown>;
+      const slug = asString(item.slug);
+      const quantity = asNumber(item.quantity);
+      if (!slug || quantity === null) {
+        return null;
+      }
+      return {
+        slug,
+        quantity: Math.max(1, Math.floor(quantity))
+      };
+    })
+    .filter((row): row is OrderLineItem => Boolean(row));
+
+  return items.length > 0 ? items : undefined;
+}
+
 export function normalizeOrder(input: unknown): OrderRecord | null {
   if (!input || typeof input !== "object") {
     return null;
@@ -137,6 +170,7 @@ export function normalizeOrder(input: unknown): OrderRecord | null {
     email,
     created,
     quantity,
+    items: normalizeLineItems(raw.items),
     status,
     amount_total,
     currency,

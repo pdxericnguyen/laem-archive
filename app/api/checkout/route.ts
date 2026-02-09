@@ -5,20 +5,18 @@ import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
+type CheckoutItem = {
+  slug: string;
+  quantity: number;
+};
+
+type ParsedCheckoutRequest = {
+  items: CheckoutItem[];
+  wantsJson: boolean;
+};
+
 function normalizeSiteUrl(url: string) {
   return url.replace(/\/+$/, "");
-}
-
-async function getSlug(request: Request) {
-  const contentType = request.headers.get("content-type") || "";
-  if (contentType.includes("application/json")) {
-    const body = await request.json();
-    return typeof body?.slug === "string" ? body.slug : null;
-  }
-
-  const formData = await request.formData();
-  const slug = formData.get("slug");
-  return typeof slug === "string" ? slug : null;
 }
 
 function asPositiveInt(value: string | undefined, fallback: number) {
@@ -27,6 +25,86 @@ function asPositiveInt(value: string | undefined, fallback: number) {
     return fallback;
   }
   return Math.max(1, Math.floor(parsed));
+}
+
+function normalizeItem(rawSlug: unknown, rawQuantity: unknown): CheckoutItem | null {
+  const slug = typeof rawSlug === "string" ? rawSlug.trim() : "";
+  const quantity = typeof rawQuantity === "number" ? rawQuantity : Number(rawQuantity ?? 1);
+  if (!slug || !Number.isFinite(quantity) || quantity <= 0) {
+    return null;
+  }
+  return {
+    slug,
+    quantity: Math.max(1, Math.floor(quantity))
+  };
+}
+
+function collapseItems(items: CheckoutItem[]) {
+  const map = new Map<string, number>();
+  for (const item of items) {
+    map.set(item.slug, (map.get(item.slug) || 0) + item.quantity);
+  }
+  return [...map.entries()].map(([slug, quantity]) => ({
+    slug,
+    quantity
+  }));
+}
+
+async function parseCheckoutRequest(request: Request): Promise<ParsedCheckoutRequest | null> {
+  const contentType = request.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body !== "object") {
+      return null;
+    }
+
+    if (Array.isArray(body.items)) {
+      const items = body.items
+        .map((row) => {
+          if (!row || typeof row !== "object") {
+            return null;
+          }
+          const item = row as Record<string, unknown>;
+          return normalizeItem(item.slug, item.quantity);
+        })
+        .filter((row): row is CheckoutItem => Boolean(row));
+
+      return {
+        items: collapseItems(items),
+        wantsJson: true
+      };
+    }
+
+    const single = normalizeItem(body.slug, body.quantity);
+    return {
+      items: single ? [single] : [],
+      wantsJson: true
+    };
+  }
+
+  const formData = await request.formData();
+  const slug = formData.get("slug");
+  const quantity = formData.get("quantity");
+  const single = normalizeItem(slug, quantity);
+  return {
+    items: single ? [single] : [],
+    wantsJson: false
+  };
+}
+
+function serializeCartMetadata(items: CheckoutItem[]) {
+  return items.map((item) => `${item.slug}:${item.quantity}`).join(",");
+}
+
+function jsonResponse(payload: unknown, status: number, headers: HeadersInit) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      ...headers,
+      "content-type": "application/json"
+    }
+  });
 }
 
 export async function POST(request: Request) {
@@ -54,63 +132,96 @@ export async function POST(request: Request) {
     return new Response("Missing SITE_URL", { status: 500, headers: rateLimitHeaders });
   }
 
+  const parsed = await parseCheckoutRequest(request);
+  if (!parsed) {
+    return new Response("Invalid request payload", { status: 400, headers: rateLimitHeaders });
+  }
+
+  const { items, wantsJson } = parsed;
+  if (items.length === 0) {
+    const errorMessage = "Missing items";
+    return wantsJson
+      ? jsonResponse({ ok: false, error: errorMessage }, 400, rateLimitHeaders)
+      : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
+  }
+
   const stripe = new Stripe(stripeSecretKey, {
     apiVersion: "2023-10-16"
   });
 
-  const slug = await getSlug(request);
-  if (!slug) {
-    return new Response("Missing slug", { status: 400, headers: rateLimitHeaders });
-  }
+  const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
+  for (const requested of items) {
+    const product = await getProduct(requested.slug);
+    if (!product || !product.published || product.archived) {
+      const errorMessage = `Product not found: ${requested.slug}`;
+      return wantsJson
+        ? jsonResponse({ ok: false, error: errorMessage }, 404, rateLimitHeaders)
+        : new Response(errorMessage, { status: 404, headers: rateLimitHeaders });
+    }
 
-  const product = await getProduct(slug);
-  if (!product || !product.published || product.archived) {
-    return new Response("Product not found", { status: 404, headers: rateLimitHeaders });
-  }
+    const stock = await getStock(requested.slug);
+    if (!stock || stock <= 0) {
+      const errorMessage = `Out of stock: ${requested.slug}`;
+      return wantsJson
+        ? jsonResponse({ ok: false, error: errorMessage }, 400, rateLimitHeaders)
+        : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
+    }
 
-  const stock = await getStock(slug);
-  if (!stock || stock <= 0) {
-    return new Response("Out of stock", { status: 400, headers: rateLimitHeaders });
+    if (requested.quantity > stock) {
+      const errorMessage = `Requested quantity exceeds stock for ${requested.slug}`;
+      return wantsJson
+        ? jsonResponse({ ok: false, error: errorMessage }, 400, rateLimitHeaders)
+        : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
+    }
+
+    const lineItem = product.priceId
+      ? {
+          price: product.priceId,
+          quantity: requested.quantity
+        }
+      : {
+          quantity: requested.quantity,
+          price_data: {
+            currency: "usd",
+            unit_amount: product.priceCents,
+            product_data: {
+              name: product.title,
+              description: product.description || product.subtitle
+            }
+          }
+        };
+    lineItems.push(lineItem);
   }
 
   const baseUrl = normalizeSiteUrl(siteUrl);
-  const lineItem = product.priceId
-    ? {
-        price: product.priceId,
-        quantity: 1,
-        adjustable_quantity: {
-          enabled: true,
-          minimum: 1,
-          maximum: stock
-        }
-      }
-    : {
-        quantity: 1,
-        adjustable_quantity: {
-          enabled: true,
-          minimum: 1,
-          maximum: stock
-        },
-        price_data: {
-          currency: "usd",
-          unit_amount: product.priceCents,
-          product_data: {
-            name: product.title,
-            description: product.description || product.subtitle
-          }
-        }
-      };
+  const singleSlug = items.length === 1 ? items[0].slug : null;
+  const successUrl = singleSlug
+    ? `${baseUrl}/products/${singleSlug}?success=1&session_id={CHECKOUT_SESSION_ID}`
+    : `${baseUrl}/cart?success=1&session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = singleSlug
+    ? `${baseUrl}/products/${singleSlug}?canceled=1`
+    : `${baseUrl}/cart?canceled=1`;
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
-    success_url: `${baseUrl}/products/${slug}?success=1&session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${baseUrl}/products/${slug}?canceled=1`,
-    line_items: [lineItem],
-    metadata: { slug }
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    line_items: lineItems,
+    metadata: {
+      cart: serializeCartMetadata(items),
+      ...(singleSlug ? { slug: singleSlug } : {})
+    }
   });
 
   if (!session.url) {
-    return new Response("Unable to create checkout session", { status: 500, headers: rateLimitHeaders });
+    const errorMessage = "Unable to create checkout session";
+    return wantsJson
+      ? jsonResponse({ ok: false, error: errorMessage }, 500, rateLimitHeaders)
+      : new Response(errorMessage, { status: 500, headers: rateLimitHeaders });
+  }
+
+  if (wantsJson) {
+    return jsonResponse({ ok: true, url: session.url }, 200, rateLimitHeaders);
   }
 
   return Response.redirect(session.url, 303);

@@ -1,10 +1,39 @@
 import Stripe from "stripe";
 
-import { decrementStockAtomic, getProduct, syncProductStockAndArchiveState } from "@/lib/inventory";
+import {
+  decrementMultipleStockAtomic,
+  getProduct,
+  syncProductStockAndArchiveState,
+  type StockRequest
+} from "@/lib/inventory";
 import { appendOrderToIndex, hasOrder, writeOrder } from "@/lib/orders";
 import { sendInventoryAlertEmail, sendOrderReceivedEmail } from "@/lib/email";
 
 export const runtime = "nodejs";
+
+function parseCartMetadata(cartValue: string | null | undefined): StockRequest[] {
+  if (!cartValue || typeof cartValue !== "string") {
+    return [];
+  }
+
+  const items = cartValue
+    .split(",")
+    .map((entry) => {
+      const [slugRaw, qtyRaw] = entry.split(":");
+      const slug = (slugRaw || "").trim();
+      const quantity = Number(qtyRaw || "0");
+      if (!slug || !Number.isFinite(quantity) || quantity <= 0) {
+        return null;
+      }
+      return {
+        slug,
+        quantity: Math.max(1, Math.floor(quantity))
+      };
+    })
+    .filter((row): row is StockRequest => Boolean(row));
+
+  return items;
+}
 
 async function getLineItemQuantity(stripe: Stripe, sessionId: string) {
   const lineItems = await stripe.checkout.sessions.listLineItems(sessionId, {
@@ -12,6 +41,26 @@ async function getLineItemQuantity(stripe: Stripe, sessionId: string) {
   });
 
   return lineItems.data.reduce((sum, item) => sum + (item.quantity ?? 0), 0);
+}
+
+async function getPurchasedItems(stripe: Stripe, session: Stripe.Checkout.Session) {
+  const fromMetadata = parseCartMetadata(session.metadata?.cart);
+  if (fromMetadata.length > 0) {
+    return fromMetadata;
+  }
+
+  const slug = session.metadata?.slug;
+  if (!slug) {
+    return [];
+  }
+
+  const quantity = await getLineItemQuantity(stripe, session.id);
+  return [
+    {
+      slug,
+      quantity: Math.max(1, quantity)
+    }
+  ];
 }
 
 export async function POST(request: Request) {
@@ -60,23 +109,28 @@ export async function POST(request: Request) {
     return new Response("Already processed", { status: 200 });
   }
 
-  const slug = session.metadata?.slug;
-  if (!slug) {
-    return new Response("Missing slug metadata", { status: 400 });
+  const purchasedItems = await getPurchasedItems(stripe, session);
+  if (purchasedItems.length === 0) {
+    return new Response("Missing cart metadata", { status: 400 });
   }
 
-  const quantity = await getLineItemQuantity(stripe, sessionId);
-  const stockResult = await decrementStockAtomic(slug, quantity);
+  const stockResult = await decrementMultipleStockAtomic(purchasedItems);
   const customerEmail = session.customer_details?.email ?? null;
-  const product = await getProduct(slug);
+  const totalQuantity = purchasedItems.reduce((sum, item) => sum + item.quantity, 0);
+  const primarySlug = purchasedItems[0]?.slug || null;
 
   if (!stockResult.ok) {
+    const failedSlug = stockResult.failedSlug ?? primarySlug;
+    const failedItem = stockResult.items[0];
+    const available = failedItem ? failedItem.current : 0;
+
     const conflictOrder = {
       id: sessionId,
-      slug,
+      slug: failedSlug,
       email: customerEmail,
       created: session.created ?? Math.floor(Date.now() / 1000),
-      quantity,
+      quantity: totalQuantity,
+      items: purchasedItems,
       status: "stock_conflict" as const,
       amount_total: session.amount_total ?? null,
       currency: session.currency ?? null
@@ -87,77 +141,84 @@ export async function POST(request: Request) {
 
     console.error("Insufficient stock during webhook processing", {
       sessionId,
-      slug,
-      quantity,
-      available: stockResult.current
+      failedSlug,
+      requested: purchasedItems,
+      available
     });
 
     try {
       await sendInventoryAlertEmail({
         kind: "oversell",
-        slug,
-        currentStock: stockResult.current,
-        previousStock: stockResult.current,
-        quantity,
+        slug: failedSlug || "unknown",
+        currentStock: available,
+        previousStock: available,
+        quantity: totalQuantity,
         orderId: sessionId
       });
     } catch (error) {
-      console.error("Inventory oversell alert failed", { sessionId, slug, error });
+      console.error("Inventory oversell alert failed", { sessionId, slug: failedSlug, error });
     }
 
     return new Response("Stock conflict recorded", { status: 200 });
   }
 
+  for (const item of stockResult.items) {
+    await syncProductStockAndArchiveState(item.slug, item.next);
+  }
+
   const orderRecord = {
     id: sessionId,
-    slug,
+    slug: primarySlug,
     email: customerEmail,
     created: session.created ?? Math.floor(Date.now() / 1000),
-    quantity,
+    quantity: totalQuantity,
+    items: purchasedItems,
     status: "paid" as const,
     amount_total: session.amount_total ?? null,
-    currency: session.currency ?? null,
+    currency: session.currency ?? null
   };
-
-  const syncedProduct = await syncProductStockAndArchiveState(slug, stockResult.next);
 
   await writeOrder(orderRecord);
   await appendOrderToIndex(sessionId);
 
-  if (stockResult.transition) {
+  for (const item of stockResult.items) {
+    if (!item.transition) {
+      continue;
+    }
     console.warn("Inventory threshold transition", {
       orderId: sessionId,
-      slug,
-      transition: stockResult.transition,
-      previous: stockResult.current,
-      next: stockResult.next
+      slug: item.slug,
+      transition: item.transition,
+      previous: item.current,
+      next: item.next
     });
     try {
       await sendInventoryAlertEmail({
-        kind: stockResult.transition,
-        slug,
-        currentStock: stockResult.next,
-        previousStock: stockResult.current,
-        quantity,
+        kind: item.transition,
+        slug: item.slug,
+        currentStock: item.next,
+        previousStock: item.current,
+        quantity: item.requested,
         orderId: sessionId
       });
     } catch (error) {
       console.error("Inventory transition alert failed", {
         orderId: sessionId,
-        slug,
-        transition: stockResult.transition,
+        slug: item.slug,
+        transition: item.transition,
         error
       });
     }
   }
 
   if (orderRecord.email) {
+    const firstProduct = primarySlug ? await getProduct(primarySlug) : null;
     try {
       await sendOrderReceivedEmail({
         orderId: sessionId,
         customerEmail: orderRecord.email,
-        productTitle: syncedProduct?.title ?? product?.title ?? null,
-        quantity
+        productTitle: firstProduct?.title ?? null,
+        quantity: totalQuantity
       });
     } catch (error) {
       console.error("Order received email failed", {

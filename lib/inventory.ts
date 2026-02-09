@@ -139,6 +139,18 @@ export type AtomicDecrementResult = {
   transition: StockTransition | null;
 };
 
+export type StockRequest = {
+  slug: string;
+  quantity: number;
+};
+
+export type MultiAtomicDecrementResult = {
+  ok: boolean;
+  items: Array<AtomicDecrementResult & { slug: string }>;
+  reason?: "invalid_request" | "insufficient_stock";
+  failedSlug?: string;
+};
+
 function parseNumberResult(value: unknown, fallback = 0) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -276,4 +288,143 @@ return {1, current, next}
   const next = current - requested;
   await kv.set(key.stock(slug), next);
   return toResult(requested, true, current, next);
+}
+
+function normalizeRequests(input: StockRequest[]) {
+  const grouped = new Map<string, number>();
+  for (const row of input) {
+    const slug = typeof row.slug === "string" ? row.slug.trim() : "";
+    const quantity = Math.floor(row.quantity);
+    if (!slug || !Number.isFinite(quantity) || quantity <= 0) {
+      continue;
+    }
+    grouped.set(slug, (grouped.get(slug) || 0) + quantity);
+  }
+  return [...grouped.entries()].map(([slug, quantity]) => ({
+    slug,
+    quantity
+  }));
+}
+
+export async function decrementMultipleStockAtomic(
+  input: StockRequest[]
+): Promise<MultiAtomicDecrementResult> {
+  const requests = normalizeRequests(input);
+  if (requests.length === 0) {
+    return { ok: false, items: [], reason: "invalid_request" };
+  }
+
+  for (const request of requests) {
+    await ensureStockKey(request.slug);
+  }
+
+  const keys = requests.map((request) => key.stock(request.slug));
+  const args = requests.map((request) => String(request.quantity));
+  const script = `
+for i = 1, #KEYS do
+  local qty = tonumber(ARGV[i]) or 0
+  if qty <= 0 then
+    return {0, i, -1}
+  end
+  local current = tonumber(redis.call("GET", KEYS[i]) or "0") or 0
+  if current < 0 then
+    current = 0
+  end
+  if current < qty then
+    return {0, i, current}
+  end
+end
+
+local out = {1}
+for i = 1, #KEYS do
+  local qty = tonumber(ARGV[i]) or 0
+  local current = tonumber(redis.call("GET", KEYS[i]) or "0") or 0
+  if current < 0 then
+    current = 0
+  end
+  local next = current - qty
+  if next < 0 then
+    next = 0
+  end
+  redis.call("SET", KEYS[i], next)
+  table.insert(out, current)
+  table.insert(out, next)
+end
+return out
+`;
+
+  try {
+    const response = (await kv.eval(script, keys, args)) as unknown;
+    if (Array.isArray(response) && response.length > 0) {
+      const ok = parseNumberResult(response[0]) === 1;
+      if (!ok) {
+        const failedIndex = Math.max(1, Math.floor(parseNumberResult(response[1])));
+        const failedSlug = requests[failedIndex - 1]?.slug;
+        const available = Math.max(0, Math.floor(parseNumberResult(response[2])));
+        return {
+          ok: false,
+          reason: "insufficient_stock",
+          failedSlug,
+          items: failedSlug
+            ? [
+                {
+                  slug: failedSlug,
+                  ...toResult(requests[failedIndex - 1]?.quantity || 0, false, available, available, "insufficient_stock")
+                }
+              ]
+            : []
+        };
+      }
+
+      const items = requests.map((request, index) => {
+        const current = Math.max(0, Math.floor(parseNumberResult(response[1 + index * 2])));
+        const next = Math.max(0, Math.floor(parseNumberResult(response[2 + index * 2], current)));
+        return {
+          slug: request.slug,
+          ...toResult(request.quantity, true, current, next)
+        };
+      });
+
+      return { ok: true, items };
+    }
+  } catch (error) {
+    console.error("Multi-stock atomic eval failed; falling back to sequential update", {
+      error,
+      requests
+    });
+  }
+
+  // Fallback path when script execution is unavailable.
+  const applied: Array<{ slug: string; previous: number; next: number; quantity: number }> = [];
+  for (const request of requests) {
+    const current = await getStock(request.slug);
+    if (current < request.quantity) {
+      for (const row of applied) {
+        await setStock(row.slug, row.previous);
+      }
+      return {
+        ok: false,
+        reason: "insufficient_stock",
+        failedSlug: request.slug,
+        items: [
+          {
+            slug: request.slug,
+            ...toResult(request.quantity, false, current, current, "insufficient_stock")
+          }
+        ]
+      };
+    }
+
+    const next = current - request.quantity;
+    await setStock(request.slug, next);
+    applied.push({ slug: request.slug, previous: current, next, quantity: request.quantity });
+  }
+
+  return {
+    ok: true,
+    items: applied.map((row) => ({
+      slug: row.slug,
+      ...toResult(row.quantity, true, row.previous, row.next)
+    }))
+  };
 }
