@@ -24,7 +24,10 @@ export async function GET(req: Request) {
   const page = Number.isFinite(rawPage) ? Math.max(1, Math.floor(rawPage)) : 1;
   const statusParam = url.searchParams.get("status");
   const status: OrderStatusFilter =
-    statusParam === "paid" || statusParam === "shipped" || statusParam === "stock_conflict"
+    statusParam === "paid" ||
+    statusParam === "shipped" ||
+    statusParam === "stock_conflict" ||
+    statusParam === "conflict_resolved"
       ? statusParam
       : "all";
   const fromParam = url.searchParams.get("from");

@@ -9,6 +9,7 @@ export type Product = {
   stock: number;
   archived: boolean;
   published: boolean;
+  autoArchiveOnZero: boolean;
   images: string[];
   materials: string;
   dimensions: string;
@@ -59,6 +60,7 @@ function normalizeProduct(input: unknown): Product | null {
     stock: Math.max(0, Math.floor(asNumber(row.stock))),
     archived: asBoolean(row.archived),
     published: asBoolean(row.published),
+    autoArchiveOnZero: asBoolean(row.autoArchiveOnZero),
     images: asStringArray(row.images),
     materials: asString(row.materials),
     dimensions: asString(row.dimensions),

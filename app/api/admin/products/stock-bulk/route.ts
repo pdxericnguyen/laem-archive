@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 
-import { setStock } from "@/lib/inventory";
-import { hasKvEnv, key, kv } from "@/lib/kv";
+import { setStock, syncProductStockAndArchiveState } from "@/lib/inventory";
+import { hasKvEnv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
-import type { Product } from "@/lib/store";
 
 type BulkStockPayload = {
   updates?: Array<{ slug?: string; stock?: number }>;
@@ -50,35 +49,20 @@ export async function POST(request: Request) {
   if (updates.length === 0) {
     return new Response("No valid stock updates", { status: 400 });
   }
-
-  const products = await kv.get<Product[]>(key.products);
-  const currentProducts = Array.isArray(products) ? products : [];
-  const indexBySlug = new Map(currentProducts.map((product, index) => [product.slug, index]));
+  let autoArchived = 0;
 
   for (const update of updates) {
     await setStock(update.slug, update.stock);
-
-    const arrayIndex = indexBySlug.get(update.slug);
-    const arrayProduct = typeof arrayIndex === "number" ? currentProducts[arrayIndex] : null;
-    const directProduct = await kv.get<Product>(key.product(update.slug));
-    const merged = directProduct ?? arrayProduct;
-
-    if (merged) {
-      const nextProduct = { ...merged, stock: update.stock };
-      await kv.set(key.product(update.slug), nextProduct);
-      if (typeof arrayIndex === "number") {
-        currentProducts[arrayIndex] = nextProduct;
-      }
+    const synced = await syncProductStockAndArchiveState(update.slug, update.stock);
+    if (synced?.autoArchiveOnZero && synced.archived && update.stock <= 0) {
+      autoArchived += 1;
     }
-  }
-
-  if (currentProducts.length > 0) {
-    await kv.set(key.products, currentProducts);
   }
 
   return NextResponse.json({
     ok: true,
     updated: updates.length,
+    autoArchived,
     rows: updates
   });
 }

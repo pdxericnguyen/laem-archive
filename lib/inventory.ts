@@ -39,6 +39,43 @@ export async function setStock(slug: string, nextValue: number) {
   await kv.set(key.stock(slug), stock);
 }
 
+async function updateProductSnapshot(
+  slug: string,
+  updater: (product: ProductRecord) => ProductRecord
+): Promise<ProductRecord | null> {
+  const direct = await kv.get<ProductRecord>(key.product(slug));
+  const products = await kv.get<ProductRecord[]>(key.products);
+  const list = Array.isArray(products) ? products : [];
+  const index = list.findIndex((product) => product.slug === slug);
+  const base = direct ?? (index >= 0 ? list[index] : null);
+
+  if (!base) {
+    return null;
+  }
+
+  const nextProduct = updater(base);
+  await kv.set(key.product(slug), nextProduct);
+  if (index >= 0) {
+    list[index] = nextProduct;
+    await kv.set(key.products, list);
+  }
+
+  await kv.set(key.archived(slug), Boolean(nextProduct.archived));
+  return nextProduct;
+}
+
+export async function syncProductStockAndArchiveState(slug: string, stockValue: number) {
+  const stock = Math.max(0, Math.floor(stockValue));
+  return updateProductSnapshot(slug, (product) => {
+    const shouldAutoArchive = Boolean(product.autoArchiveOnZero) && stock <= 0;
+    return {
+      ...product,
+      stock,
+      archived: shouldAutoArchive ? true : Boolean(product.archived)
+    };
+  });
+}
+
 export async function isPublished(slug: string) {
   const published = await kv.get<boolean>(key.published(slug));
   if (typeof published === "boolean") {

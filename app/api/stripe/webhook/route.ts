@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 
-import { decrementStockAtomic, getProduct } from "@/lib/inventory";
+import { decrementStockAtomic, getProduct, syncProductStockAndArchiveState } from "@/lib/inventory";
 import { appendOrderToIndex, hasOrder, writeOrder } from "@/lib/orders";
 import { sendInventoryAlertEmail, sendOrderReceivedEmail } from "@/lib/email";
 
@@ -119,6 +119,8 @@ export async function POST(request: Request) {
     currency: session.currency ?? null,
   };
 
+  const syncedProduct = await syncProductStockAndArchiveState(slug, stockResult.next);
+
   await writeOrder(orderRecord);
   await appendOrderToIndex(sessionId);
 
@@ -154,7 +156,7 @@ export async function POST(request: Request) {
       await sendOrderReceivedEmail({
         orderId: sessionId,
         customerEmail: orderRecord.email,
-        productTitle: product?.title ?? null,
+        productTitle: syncedProduct?.title ?? product?.title ?? null,
         quantity
       });
     } catch (error) {

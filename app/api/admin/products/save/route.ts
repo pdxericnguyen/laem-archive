@@ -12,6 +12,7 @@ type ProductPayload = {
   stock: number;
   archived: boolean;
   published: boolean;
+  autoArchiveOnZero: boolean;
   images: string[];
   materials: string;
   dimensions: string;
@@ -82,6 +83,7 @@ async function getPayload(request: Request): Promise<ProductPayload | null> {
       stock: typeof body.stock === "number" ? body.stock : Number(body.stock ?? 0),
       archived: Boolean(body.archived),
       published: Boolean(body.published),
+      autoArchiveOnZero: Boolean(body.autoArchiveOnZero),
       images: Array.isArray(body.images)
         ? body.images.filter((item) => typeof item === "string")
         : [],
@@ -118,6 +120,7 @@ async function getPayload(request: Request): Promise<ProductPayload | null> {
     stock: parseNumber(formData.get("stock")),
     archived: parseBoolean(formData.get("archived")),
     published: parseBoolean(formData.get("published")),
+    autoArchiveOnZero: parseBoolean(formData.get("autoArchiveOnZero")),
     images: parseImages(formData.get("images")),
     materials: typeof formData.get("materials") === "string" ? String(formData.get("materials")) : "",
     dimensions: typeof formData.get("dimensions") === "string" ? String(formData.get("dimensions")) : "",
@@ -142,15 +145,20 @@ export async function POST(request: Request) {
     return new Response("Invalid payload", { status: 400 });
   }
 
+  const normalizedStock = clampToNonNegativeInt(payload.stock);
+  const normalizedPrice = clampToNonNegativeInt(payload.priceCents);
+  const archived = payload.autoArchiveOnZero && normalizedStock <= 0 ? true : payload.archived;
+
   const product: Product = {
     slug: payload.slug,
     title: payload.title,
     subtitle: payload.subtitle,
     description: payload.description,
-    priceCents: clampToNonNegativeInt(payload.priceCents),
-    stock: clampToNonNegativeInt(payload.stock),
-    archived: payload.archived,
+    priceCents: normalizedPrice,
+    stock: normalizedStock,
+    archived,
     published: payload.published,
+    autoArchiveOnZero: payload.autoArchiveOnZero,
     images: payload.images,
     materials: payload.materials,
     dimensions: payload.dimensions,
