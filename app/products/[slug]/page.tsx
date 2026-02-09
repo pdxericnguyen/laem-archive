@@ -1,5 +1,6 @@
 import { getProduct } from "@/lib/store";
 import ProductGallery from "./gallery";
+import ProductActions from "./actions";
 
 export const metadata = { title: "Product | LAEM Archive" };
 
@@ -16,9 +17,10 @@ export default async function ProductPage({ params }: { params: { slug: string }
   const isUnavailable = product.archived || product.stock <= 0;
   const description =
     product.description && product.description !== product.subtitle ? product.description : "";
+  const primaryImage = product.images[0] || "/placeholder-product.svg";
 
   return (
-    <main className="mx-auto max-w-6xl px-4 py-10 pb-24 md:pb-10">
+    <main className="mx-auto max-w-6xl px-4 py-8 md:py-10">
       <div className="grid gap-10 md:grid-cols-2">
         <section className="space-y-3">
           <ProductGallery title={product.title} images={product.images} />
@@ -47,17 +49,14 @@ export default async function ProductPage({ params }: { params: { slug: string }
               </div>
             </div>
 
-            <form action="/api/checkout" method="POST">
-              <input type="hidden" name="slug" value={product.slug} />
-              <button
-                disabled={isUnavailable}
-                className="w-full h-12 bg-silver text-silver-text border border-silver-border text-sm font-semibold
-                           hover:bg-silver-hover active:bg-silver-active
-                           disabled:bg-silver-disabled disabled:text-neutral-500 disabled:cursor-not-allowed"
-              >
-                Purchase
-              </button>
-            </form>
+            <ProductActions
+              slug={product.slug}
+              title={product.title}
+              priceCents={product.priceCents}
+              image={primaryImage}
+              stock={product.stock}
+              unavailable={isUnavailable}
+            />
 
             {product.stock <= 0 && !product.archived && (
               <div className="text-sm text-neutral-700">
@@ -109,31 +108,6 @@ export default async function ProductPage({ params }: { params: { slug: string }
           </p>
         </section>
       </div>
-
-      {!product.archived && (
-        <div className="md:hidden fixed bottom-0 left-0 right-0 border-t border-neutral-200 bg-white px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-xs uppercase tracking-[0.12em] text-neutral-500">Price</div>
-              <div className="text-sm font-semibold">${Math.round(product.priceCents / 100)}</div>
-              <div className="text-[11px] text-neutral-600">
-                {product.stock > 0 ? `${product.stock} available` : "Unavailable"}
-              </div>
-            </div>
-            <form action="/api/checkout" method="POST" className="flex-1">
-              <input type="hidden" name="slug" value={product.slug} />
-              <button
-                disabled={product.stock <= 0}
-                className="w-full h-11 bg-silver text-silver-text border border-silver-border text-sm font-semibold
-                           hover:bg-silver-hover active:bg-silver-active
-                           disabled:bg-silver-disabled disabled:text-neutral-500 disabled:cursor-not-allowed"
-              >
-                Purchase
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
     </main>
   );
 }

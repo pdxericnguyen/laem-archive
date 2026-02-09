@@ -51,6 +51,12 @@ npm run seed:kv
 - Mark paid orders shipped with inline success/error feedback.
 - `stock_conflict` orders are non-shippable until resolved via the admin `Mark conflict resolved` action.
 
+## Cart + Checkout
+- Storefront supports multi-item cart at `/cart`.
+- Product and shop pages support `Add to Cart`.
+- `/api/checkout` accepts multi-item JSON payloads (`items: [{ slug, quantity }]`) for cart checkout.
+- Stripe webhook reads cart metadata and decrements stock per item atomically.
+
 ## Pages
 - /shop
 - /archive
