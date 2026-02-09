@@ -1,4 +1,5 @@
 import { getProduct } from "@/lib/store";
+import ProductGallery from "./gallery";
 
 export const metadata = { title: "Product | LAEM Archive" };
 
@@ -20,14 +21,7 @@ export default async function ProductPage({ params }: { params: { slug: string }
     <main className="mx-auto max-w-6xl px-4 py-10 pb-24 md:pb-10">
       <div className="grid gap-10 md:grid-cols-2">
         <section className="space-y-3">
-          <div className="relative aspect-[4/5] w-full overflow-hidden bg-neutral-100">
-            <img
-              src={product.images[0]}
-              alt={product.title}
-              className="h-full w-full object-cover"
-              loading="lazy"
-            />
-          </div>
+          <ProductGallery title={product.title} images={product.images} />
         </section>
 
         <section className="space-y-6">

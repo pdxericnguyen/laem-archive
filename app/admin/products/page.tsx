@@ -74,7 +74,7 @@ export default async function AdminProductsPage() {
               <input name="stock" type="number" className="h-10 border border-neutral-300 px-3" />
             </label>
           </div>
-          <div className="flex gap-4 text-xs uppercase tracking-[0.12em] text-neutral-500">
+          <div className="flex flex-wrap gap-4 text-xs uppercase tracking-[0.12em] text-neutral-500">
             <label className="flex items-center gap-2">
               <input name="published" type="checkbox" defaultChecked />
               Published
@@ -82,6 +82,10 @@ export default async function AdminProductsPage() {
             <label className="flex items-center gap-2">
               <input name="archived" type="checkbox" />
               Archived
+            </label>
+            <label className="flex items-center gap-2">
+              <input name="autoArchiveOnZero" type="checkbox" />
+              Auto-archive at zero stock
             </label>
           </div>
           <ImageUploadField name="images" />
@@ -172,7 +176,7 @@ export default async function AdminProductsPage() {
                     />
                   </label>
                 </div>
-                <div className="flex gap-4 text-xs uppercase tracking-[0.12em] text-neutral-500">
+                <div className="flex flex-wrap gap-4 text-xs uppercase tracking-[0.12em] text-neutral-500">
                   <label className="flex items-center gap-2">
                     <input name="published" type="checkbox" defaultChecked={product.published} />
                     Published
@@ -180,6 +184,14 @@ export default async function AdminProductsPage() {
                   <label className="flex items-center gap-2">
                     <input name="archived" type="checkbox" defaultChecked={product.archived} />
                     Archived
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      name="autoArchiveOnZero"
+                      type="checkbox"
+                      defaultChecked={product.autoArchiveOnZero}
+                    />
+                    Auto-archive at zero stock
                   </label>
                 </div>
                 <ImageUploadField name="images" defaultValue={product.images.join("\n")} />

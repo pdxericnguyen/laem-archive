@@ -1,6 +1,6 @@
 import { key, kv } from "@/lib/kv";
 
-export type OrderStatus = "paid" | "shipped" | "stock_conflict";
+export type OrderStatus = "paid" | "shipped" | "stock_conflict" | "conflict_resolved";
 export type OrderStatusFilter = "all" | OrderStatus;
 
 export type OrderShipping = {
@@ -8,6 +8,11 @@ export type OrderShipping = {
   trackingNumber: string;
   trackingUrl: string;
   shippedAt: number;
+};
+
+export type OrderConflictResolution = {
+  note: string;
+  resolvedAt: number;
 };
 
 export type OrderRecord = {
@@ -20,6 +25,7 @@ export type OrderRecord = {
   amount_total: number | null;
   currency: string | null;
   shipping?: OrderShipping;
+  conflictResolution?: OrderConflictResolution;
 };
 
 type LooseOrderRecord = {
@@ -41,6 +47,10 @@ type LooseOrderRecord = {
     trackingUrl?: unknown;
     shippedAt?: unknown;
   } | null;
+  conflictResolution?: {
+    note?: unknown;
+    resolvedAt?: unknown;
+  } | null;
 };
 
 function asString(value: unknown) {
@@ -54,6 +64,9 @@ function asNumber(value: unknown) {
 function normalizeStatus(value: unknown): OrderStatus {
   if (value === "stock_conflict") {
     return "stock_conflict";
+  }
+  if (value === "conflict_resolved") {
+    return "conflict_resolved";
   }
   return value === "shipped" ? "shipped" : "paid";
 }
@@ -77,6 +90,25 @@ function normalizeShipping(value: LooseOrderRecord["shipping"]): OrderShipping |
     trackingNumber,
     trackingUrl,
     shippedAt
+  };
+}
+
+function normalizeConflictResolution(
+  value: LooseOrderRecord["conflictResolution"]
+): OrderConflictResolution | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const note = asString(value.note) ?? "Resolved in admin";
+  const resolvedAt = asNumber(value.resolvedAt);
+  if (resolvedAt === null) {
+    return undefined;
+  }
+
+  return {
+    note,
+    resolvedAt
   };
 }
 
@@ -108,7 +140,8 @@ export function normalizeOrder(input: unknown): OrderRecord | null {
     status,
     amount_total,
     currency,
-    shipping: normalizeShipping(raw.shipping)
+    shipping: normalizeShipping(raw.shipping),
+    conflictResolution: normalizeConflictResolution(raw.conflictResolution)
   };
 }
 

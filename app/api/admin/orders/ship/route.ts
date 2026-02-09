@@ -80,6 +80,13 @@ export async function POST(request: Request) {
     );
   }
 
+  if (order.status === "conflict_resolved") {
+    return NextResponse.json(
+      { ok: false, error: "Order conflict already resolved. Shipping is disabled for this order." },
+      { status: 409 }
+    );
+  }
+
   if (order.status === "shipped") {
     return NextResponse.json({ ok: true, already: true });
   }

@@ -8,7 +8,7 @@ export default function AdminOrdersPage() {
       <header className="space-y-2">
         <h1 className="text-lg font-semibold tracking-tight">Orders</h1>
         <p className="text-sm text-neutral-600">
-          Filter by status/date, page through results, and mark paid orders as shipped.
+          Filter by status/date, page through results, resolve stock conflicts, and mark paid orders as shipped.
         </p>
       </header>
 

@@ -20,10 +20,14 @@ type OrderRow = {
     trackingUrl: string;
     shippedAt?: number;
   };
+  conflictResolution?: {
+    note?: string;
+    resolvedAt?: number;
+  };
 };
 
 type Filters = {
-  status: "all" | "paid" | "shipped" | "stock_conflict";
+  status: "all" | "paid" | "shipped" | "stock_conflict" | "conflict_resolved";
   from: string;
   to: string;
 };
@@ -58,6 +62,9 @@ function formatMoney(amountTotal?: number | null, currency?: string | null) {
 function toStatusLabel(status?: OrderStatus) {
   if (status === "shipped") {
     return "Shipped";
+  }
+  if (status === "conflict_resolved") {
+    return "Conflict Resolved";
   }
   if (status === "stock_conflict") {
     return "Stock Conflict";
@@ -173,6 +180,7 @@ export default function OrdersClient() {
             <option value="paid">Paid</option>
             <option value="shipped">Shipped</option>
             <option value="stock_conflict">Stock conflict</option>
+            <option value="conflict_resolved">Conflict resolved</option>
           </select>
         </label>
         <label className="grid gap-1">
@@ -239,6 +247,10 @@ export default function OrdersClient() {
                 setNotice({ kind: "success", text: message });
                 await load(page, filters);
               }}
+              onResolved={async (message) => {
+                setNotice({ kind: "success", text: message });
+                await load(page, filters);
+              }}
             />
           ))}
         </div>
@@ -274,12 +286,16 @@ export default function OrdersClient() {
 
 function OrderCard({
   row,
-  onShipped
+  onShipped,
+  onResolved
 }: {
   row: OrderRow;
   onShipped: (message: string) => Promise<void>;
+  onResolved: (message: string) => Promise<void>;
 }) {
   const [sending, setSending] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [resolveNote, setResolveNote] = useState("Refund handled in Stripe");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -317,6 +333,38 @@ function OrderCard({
       setError("Ship failed.");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function markResolved(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setResolving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch("/api/admin/orders/resolve", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          orderId: row.id,
+          note: resolveNote
+        })
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.ok) {
+        setError(data?.error || "Resolve failed.");
+        return;
+      }
+
+      const msg = data?.already ? "Conflict was already resolved." : "Conflict resolved.";
+      setSuccess(msg);
+      await onResolved(msg);
+    } catch {
+      setError("Resolve failed.");
+    } finally {
+      setResolving(false);
     }
   }
 
@@ -363,9 +411,35 @@ function OrderCard({
       ) : null}
 
       {row.status === "stock_conflict" ? (
-        <p className="text-xs text-red-600">
-          Stock conflict detected. Resolve/refund before any fulfillment action.
-        </p>
+        <div className="space-y-2">
+          <p className="text-xs text-red-600">
+            Stock conflict detected. Resolve/refund before any fulfillment action.
+          </p>
+          <form onSubmit={markResolved} className="grid gap-2">
+            <textarea
+              value={resolveNote}
+              onChange={(event) => setResolveNote(event.target.value)}
+              className="min-h-20 border border-neutral-300 p-2 text-sm"
+              placeholder="Resolution note (refund, replacement, manual handling)"
+            />
+            <button
+              disabled={resolving}
+              className="h-10 border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 disabled:opacity-50"
+            >
+              {resolving ? "Saving..." : "Mark conflict resolved"}
+            </button>
+          </form>
+        </div>
+      ) : null}
+
+      {row.status === "conflict_resolved" ? (
+        <div className="space-y-1 text-xs text-neutral-700">
+          <p>Conflict resolved. Fulfillment is disabled for this order.</p>
+          {row.conflictResolution?.note ? <p>Note: {row.conflictResolution.note}</p> : null}
+          {row.conflictResolution?.resolvedAt ? (
+            <p>Resolved at: {formatDate(row.conflictResolution.resolvedAt)}</p>
+          ) : null}
+        </div>
       ) : null}
 
       {row.status === "paid" ? (
