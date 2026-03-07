@@ -5,6 +5,7 @@ A runnable Next.js + Tailwind prototype for LAEM Archive.
 ## Run
 ```bash
 npm install
+npm run env:audit
 npm run dev
 ```
 
