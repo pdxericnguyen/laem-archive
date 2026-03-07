@@ -2,51 +2,67 @@ import { kv } from "@vercel/kv";
 
 const products = [
   {
-    slug: "silver-band-01",
-    title: "Silver Band 01",
-    subtitle: "Solid silver, hand-finished.",
-    description: "A clean band profile in solid sterling silver with a hand-finished surface.",
-    priceCents: 24000,
-    stock: 4,
+    slug: "silver-necklace-01",
+    title: "Silver Necklace 01",
+    subtitle: "Sterling silver sample listing.",
+    description: "Presentation placeholder for necklace flow.",
+    priceCents: 21000,
+    stock: 1,
     archived: false,
     published: true,
     autoArchiveOnZero: false,
     images: ["https://via.placeholder.com/1200x1500"],
     materials: "Solid silver (925).",
-    dimensions: "Band width: 6mm\nWeight: ~12g",
-    care: "Avoid harsh chemicals. Patina is expected.",
+    dimensions: "Necklace length: TBD",
+    care: "Care details pending.",
     shippingReturns: "Ships in 3-7 days. Returns within 7 days (unworn)."
   },
   {
-    slug: "chain-form-02",
-    title: "Chain Form 02",
-    subtitle: "Hand-assembled links.",
-    description: "Hand-assembled linked form built for everyday wear with sculptural weight.",
-    priceCents: 31000,
-    stock: 0,
+    slug: "silver-ring-01",
+    title: "Silver Ring 01",
+    subtitle: "Sterling silver sample listing.",
+    description: "Presentation placeholder for ring flow.",
+    priceCents: 16000,
+    stock: 1,
     archived: false,
     published: true,
-    autoArchiveOnZero: true,
+    autoArchiveOnZero: false,
     images: ["https://via.placeholder.com/1200x1500"],
     materials: "Solid silver (925).",
-    dimensions: "Length: 18in\nWeight: ~22g",
-    care: "Wipe after wear. Store dry.",
+    dimensions: "Ring size: TBD",
+    care: "Care details pending.",
     shippingReturns: "Ships in 3-7 days. Returns within 7 days (unworn)."
   },
   {
-    slug: "pearl-hook-01",
-    title: "Pearl Hook 01",
-    subtitle: "Silver + pearl accent.",
-    description: "Sterling silver form paired with a pearl accent and light drop profile.",
-    priceCents: 28000,
-    stock: 0,
-    archived: true,
+    slug: "silver-bangle-01",
+    title: "Silver Bangle 01",
+    subtitle: "Sterling silver sample listing.",
+    description: "Presentation placeholder for bangle flow.",
+    priceCents: 19000,
+    stock: 1,
+    archived: false,
     published: true,
-    autoArchiveOnZero: true,
+    autoArchiveOnZero: false,
     images: ["https://via.placeholder.com/1200x1500"],
-    materials: "Solid silver (925). Pearl accent.",
-    dimensions: "Drop: 22mm\nWeight: ~6g",
-    care: "Avoid perfumes on pearl. Wipe gently.",
+    materials: "Solid silver (925).",
+    dimensions: "Inner diameter: TBD",
+    care: "Care details pending.",
+    shippingReturns: "Ships in 3-7 days. Returns within 7 days (unworn)."
+  },
+  {
+    slug: "silver-earrings-01",
+    title: "Silver Earrings 01",
+    subtitle: "Sterling silver sample listing.",
+    description: "Presentation placeholder for earrings flow.",
+    priceCents: 14000,
+    stock: 1,
+    archived: false,
+    published: true,
+    autoArchiveOnZero: false,
+    images: ["https://via.placeholder.com/1200x1500"],
+    materials: "Solid silver (925).",
+    dimensions: "Earring drop: TBD",
+    care: "Care details pending.",
     shippingReturns: "Ships in 3-7 days. Returns within 7 days (unworn)."
   }
 ];
@@ -68,7 +84,15 @@ async function seed() {
     products.map(async (product) => {
       await kv.set(`product:${product.slug}`, product);
       await kv.set(`stock:${product.slug}`, product.stock);
+      await kv.set(`published:${product.slug}`, product.published);
+      await kv.set(`archived:${product.slug}`, product.archived);
     })
+  );
+
+  await kv.del("products:index");
+  await kv.rpush(
+    "products:index",
+    ...products.map((product) => product.slug)
   );
 
   console.log(`Seeded ${products.length} products into KV.`);
