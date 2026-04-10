@@ -4,7 +4,7 @@ import { CartProvider } from "@/lib/cart";
 
 export const metadata = {
   title: "LAEM Archive",
-  description: "Silver objects. Small runs. Archive-forward storefront."
+  description: "Silver objects. Small runs. Hand-finished contemporary silver storefront."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
