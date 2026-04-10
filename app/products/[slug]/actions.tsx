@@ -11,6 +11,7 @@ type Props = {
   image: string;
   stock: number;
   unavailable: boolean;
+  unavailableLabel: string;
 };
 
 function clampQuantity(value: number, stock: number) {
@@ -20,7 +21,15 @@ function clampQuantity(value: number, stock: number) {
   return Math.max(1, Math.min(Math.floor(value), Math.max(1, Math.floor(stock || 1))));
 }
 
-export default function ProductActions({ slug, title, priceCents, image, stock, unavailable }: Props) {
+export default function ProductActions({
+  slug,
+  title,
+  priceCents,
+  image,
+  stock,
+  unavailable,
+  unavailableLabel
+}: Props) {
   const { addItem } = useCart();
   const [quantity, setQuantity] = useState(1);
   const [status, setStatus] = useState<string | null>(null);
@@ -122,7 +131,7 @@ export default function ProductActions({ slug, title, priceCents, image, stock, 
           disabled={unavailable}
           className="h-11 border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 disabled:opacity-50"
         >
-          {unavailable ? "Unavailable" : "Add to Cart"}
+          {unavailable ? unavailableLabel : "Add to Cart"}
         </button>
         <button
           type="button"
@@ -130,7 +139,7 @@ export default function ProductActions({ slug, title, priceCents, image, stock, 
           disabled={unavailable || buying}
           className="h-11 bg-silver text-silver-text border border-silver-border text-sm font-semibold hover:bg-silver-hover active:bg-silver-active disabled:bg-silver-disabled disabled:text-neutral-500 disabled:cursor-not-allowed"
         >
-          {buying ? "Redirecting..." : "Buy Now"}
+          {buying ? "Redirecting..." : unavailable ? unavailableLabel : "Buy Now"}
         </button>
       </div>
 

@@ -38,7 +38,7 @@ export default async function ShopPage() {
                   />
                   <div className="absolute left-2 top-2">
                     <span className="inline-flex items-center border border-neutral-200 bg-white/90 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-700">
-                      {item.stock > 0 ? `${item.stock} available` : "Unavailable"}
+                      {item.stock > 0 ? `${item.stock} available` : "Sold out"}
                     </span>
                   </div>
                 </div>
@@ -61,6 +61,7 @@ export default async function ShopPage() {
                   priceCents={item.priceCents}
                   image={primaryImage}
                   stock={item.stock}
+                  unavailableLabel="Sold out"
                 />
               </div>
             </article>

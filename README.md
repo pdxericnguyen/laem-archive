@@ -14,11 +14,11 @@ Set these environment variables before running the app:
 - STRIPE_SECRET_KEY
 - STRIPE_WEBHOOK_SECRET
 - SITE_URL
+- UPSTASH_REDIS_REST_URL or KV_REST_API_URL
+- UPSTASH_REDIS_REST_TOKEN or KV_REST_API_TOKEN
 - RESEND_API_KEY
 - EMAIL_FROM
 - RESEND_FROM
-- KV_REST_API_URL
-- KV_REST_API_TOKEN
 - ADMIN_TOKEN
 - ADMIN_SESSION_SECRET
 - BLOB_READ_WRITE_TOKEN
@@ -34,6 +34,8 @@ Set these environment variables before running the app:
 ```bash
 npm run seed:kv
 ```
+
+The app now uses `@upstash/redis` directly. If your Vercel integration injects legacy `KV_REST_*` variables, those aliases are still accepted.
 
 ## Admin Auth
 - Visit `/admin/login` and sign in with `ADMIN_TOKEN`.

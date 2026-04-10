@@ -5,12 +5,15 @@ const requiredVars = [
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
   "SITE_URL",
-  "KV_REST_API_URL",
-  "KV_REST_API_TOKEN",
   "ADMIN_TOKEN",
   "ADMIN_SESSION_SECRET",
   "RESEND_API_KEY",
   "BLOB_READ_WRITE_TOKEN"
+];
+
+const requiredAnyOf = [
+  ["UPSTASH_REDIS_REST_URL", "KV_REST_API_URL"],
+  ["UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_TOKEN"]
 ];
 
 const optionalVars = [
@@ -94,6 +97,11 @@ function loadEnv() {
 function main() {
   const env = loadEnv();
   const missingRequired = requiredVars.filter((name) => !isSet(env[name]));
+  for (const names of requiredAnyOf) {
+    if (!names.some((name) => isSet(env[name]))) {
+      missingRequired.push(names.join(" or "));
+    }
+  }
   const hasSender = isSet(env.EMAIL_FROM) || isSet(env.RESEND_FROM);
 
   const warnings = [];
@@ -114,7 +122,7 @@ function main() {
   }
 
   console.log("Environment audit");
-  console.log(`Required variables checked: ${requiredVars.length + 1}`);
+  console.log(`Required variables checked: ${requiredVars.length + requiredAnyOf.length + 1}`);
   console.log(`Optional variables checked: ${optionalVars.length}`);
 
   if (missingRequired.length > 0) {
