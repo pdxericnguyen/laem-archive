@@ -5,7 +5,7 @@ export default function Home() {
         <p className="text-xs uppercase tracking-[0.12em] text-neutral-600">LAEM Archive</p>
         <h1 className="text-xl md:text-2xl font-semibold tracking-tight">Silver objects.</h1>
         <p className="text-sm text-neutral-700 max-w-2xl">
-          Small runs. Hand-finished. Archive-forward presentation.
+          Small runs. Hand-finished.
         </p>
       </header>
 
