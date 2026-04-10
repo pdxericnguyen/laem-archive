@@ -10,6 +10,7 @@ type Props = {
   priceCents: number;
   image: string;
   stock: number;
+  unavailableLabel?: string;
   quantity?: number;
   className?: string;
   disabled?: boolean;
@@ -21,6 +22,7 @@ export default function AddToCartButton({
   priceCents,
   image,
   stock,
+  unavailableLabel = "Unavailable",
   quantity = 1,
   className,
   disabled
@@ -59,7 +61,7 @@ export default function AddToCartButton({
           "w-full h-10 border border-neutral-300 text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
         }
       >
-        {unavailable ? "Unavailable" : "Add to Cart"}
+        {unavailable ? unavailableLabel : "Add to Cart"}
       </button>
       {message ? <p className="text-[11px] text-neutral-600">{message}</p> : null}
     </div>

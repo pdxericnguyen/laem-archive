@@ -110,7 +110,5 @@ export async function getShopItems() {
 
 export async function getArchiveItems() {
   const products = await getAllProducts();
-  return products.filter(
-    (product) => product.archived || (product.published && product.stock <= 0)
-  );
+  return products.filter((product) => product.published && product.archived);
 }

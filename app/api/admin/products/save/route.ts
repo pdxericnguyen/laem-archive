@@ -5,13 +5,14 @@ import type { Product } from "@/lib/store";
 
 type ProductPayload = {
   slug: string;
+  originalSlug: string;
+  returnStatusFilter: "all" | "live" | "sold-out" | "archived" | "hidden";
   title: string;
   subtitle: string;
   description: string;
   priceCents: number;
   stock: number;
-  archived: boolean;
-  published: boolean;
+  status: "live" | "archived" | "hidden";
   autoArchiveOnZero: boolean;
   images: string[];
   materials: string;
@@ -19,6 +20,21 @@ type ProductPayload = {
   care: string;
   shippingReturns: string;
 };
+
+function normalizeStatus(value: unknown): ProductPayload["status"] | null {
+  return value === "live" || value === "archived" || value === "hidden" ? value : null;
+}
+
+function normalizeReturnStatusFilter(value: unknown): ProductPayload["returnStatusFilter"] {
+  return value === "live" || value === "sold-out" || value === "archived" || value === "hidden" ? value : "all";
+}
+
+function getLegacyStatus(published: boolean, archived: boolean): ProductPayload["status"] {
+  if (!published) {
+    return "hidden";
+  }
+  return archived ? "archived" : "live";
+}
 
 function parseBoolean(value: FormDataEntryValue | null | undefined) {
   if (!value) {
@@ -36,6 +52,23 @@ function parseNumber(value: FormDataEntryValue | null | undefined) {
   }
   const num = typeof value === "string" ? Number(value) : Number(value.toString());
   return Number.isFinite(num) ? num : 0;
+}
+
+function parsePriceToCents(value: unknown) {
+  const raw = typeof value === "number" ? value : Number(value ?? 0);
+  if (!Number.isFinite(raw)) {
+    return 0;
+  }
+  return Math.max(0, Math.round(raw * 100));
+}
+
+function parsePriceFromBody(body: Record<string, unknown>) {
+  if (body.price !== undefined) {
+    return parsePriceToCents(body.price);
+  }
+  const legacyValue =
+    typeof body.priceCents === "number" ? body.priceCents : Number(body.priceCents ?? 0);
+  return Number.isFinite(legacyValue) ? Math.max(0, Math.floor(legacyValue)) : 0;
 }
 
 function clampToNonNegativeInt(value: number) {
@@ -71,6 +104,11 @@ async function getPayload(request: Request): Promise<ProductPayload | null> {
 
     return {
       slug,
+      originalSlug:
+        typeof body.originalSlug === "string" && body.originalSlug.trim()
+          ? body.originalSlug.trim()
+          : slug,
+      returnStatusFilter: normalizeReturnStatusFilter(body.returnStatusFilter),
       title,
       subtitle: typeof body.subtitle === "string" ? body.subtitle : "",
       description:
@@ -79,10 +117,10 @@ async function getPayload(request: Request): Promise<ProductPayload | null> {
           : typeof body.subtitle === "string"
             ? body.subtitle
             : "",
-      priceCents: typeof body.priceCents === "number" ? body.priceCents : Number(body.priceCents ?? 0),
+      priceCents: parsePriceFromBody(body),
       stock: typeof body.stock === "number" ? body.stock : Number(body.stock ?? 0),
-      archived: Boolean(body.archived),
-      published: Boolean(body.published),
+      status:
+        normalizeStatus(body.status) || getLegacyStatus(Boolean(body.published), Boolean(body.archived)),
       autoArchiveOnZero: Boolean(body.autoArchiveOnZero),
       images: Array.isArray(body.images)
         ? body.images.filter((item) => typeof item === "string")
@@ -108,6 +146,11 @@ async function getPayload(request: Request): Promise<ProductPayload | null> {
 
   return {
     slug: trimmedSlug,
+    originalSlug:
+      typeof formData.get("originalSlug") === "string" && String(formData.get("originalSlug")).trim()
+        ? String(formData.get("originalSlug")).trim()
+        : trimmedSlug,
+    returnStatusFilter: normalizeReturnStatusFilter(formData.get("returnStatusFilter")),
     title: trimmedTitle,
     subtitle: typeof formData.get("subtitle") === "string" ? String(formData.get("subtitle")) : "",
     description:
@@ -116,10 +159,11 @@ async function getPayload(request: Request): Promise<ProductPayload | null> {
         : typeof formData.get("subtitle") === "string"
           ? String(formData.get("subtitle"))
           : "",
-    priceCents: parseNumber(formData.get("priceCents")),
+    priceCents: parsePriceToCents(formData.get("price") ?? formData.get("priceCents")),
     stock: parseNumber(formData.get("stock")),
-    archived: parseBoolean(formData.get("archived")),
-    published: parseBoolean(formData.get("published")),
+    status:
+      normalizeStatus(formData.get("status")) ||
+      getLegacyStatus(parseBoolean(formData.get("published")), parseBoolean(formData.get("archived"))),
     autoArchiveOnZero: parseBoolean(formData.get("autoArchiveOnZero")),
     images: parseImages(formData.get("images")),
     materials: typeof formData.get("materials") === "string" ? String(formData.get("materials")) : "",
@@ -147,7 +191,9 @@ export async function POST(request: Request) {
 
   const normalizedStock = clampToNonNegativeInt(payload.stock);
   const normalizedPrice = clampToNonNegativeInt(payload.priceCents);
-  const archived = payload.autoArchiveOnZero && normalizedStock <= 0 ? true : payload.archived;
+  const published = payload.status !== "hidden";
+  const archived =
+    payload.status === "archived" || (payload.status === "live" && payload.autoArchiveOnZero && normalizedStock <= 0);
 
   const product: Product = {
     slug: payload.slug,
@@ -157,7 +203,7 @@ export async function POST(request: Request) {
     priceCents: normalizedPrice,
     stock: normalizedStock,
     archived,
-    published: payload.published,
+    published,
     autoArchiveOnZero: payload.autoArchiveOnZero,
     images: payload.images,
     materials: payload.materials,
@@ -168,7 +214,8 @@ export async function POST(request: Request) {
 
   const existing = await kv.get<Product[]>(key.products);
   const products = Array.isArray(existing) ? existing : [];
-  const index = products.findIndex((item) => item.slug === product.slug);
+  const originalSlug = payload.originalSlug || product.slug;
+  const index = products.findIndex((item) => item.slug === originalSlug);
   if (index >= 0) {
     products[index] = product;
   } else {
@@ -180,6 +227,12 @@ export async function POST(request: Request) {
   await setStock(product.slug, product.stock);
   await kv.set(key.published(product.slug), product.published);
   await kv.set(key.archived(product.slug), product.archived);
+  if (originalSlug !== product.slug) {
+    await kv.del(key.product(originalSlug));
+    await kv.del(key.stock(originalSlug));
+    await kv.del(key.published(originalSlug));
+    await kv.del(key.archived(originalSlug));
+  }
   await kv.del(key.productsIndex);
   if (products.length > 0) {
     await kv.rpush(
@@ -194,5 +247,8 @@ export async function POST(request: Request) {
   }
 
   const redirectUrl = new URL("/admin/products", request.url);
+  if (payload.returnStatusFilter !== "all") {
+    redirectUrl.searchParams.set("status", payload.returnStatusFilter);
+  }
   return Response.redirect(redirectUrl, 303);
 }

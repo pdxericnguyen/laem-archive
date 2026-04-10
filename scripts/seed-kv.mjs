@@ -1,4 +1,4 @@
-import { kv } from "@vercel/kv";
+import { Redis } from "@upstash/redis";
 
 const products = [
   {
@@ -67,16 +67,20 @@ const products = [
   }
 ];
 
-function requireEnv(name) {
-  if (!process.env[name]) {
-    console.error(`Missing ${name}.`);
+function getRedisConfig() {
+  const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+  if (!url || !token) {
+    console.error(
+      "Missing Redis credentials. Set UPSTASH_REDIS_REST_URL/UPSTASH_REDIS_REST_TOKEN or KV_REST_API_URL/KV_REST_API_TOKEN."
+    );
     process.exit(1);
   }
+  return { url, token };
 }
 
 async function seed() {
-  requireEnv("KV_REST_API_URL");
-  requireEnv("KV_REST_API_TOKEN");
+  const kv = new Redis(getRedisConfig());
 
   await kv.set("products", products);
 

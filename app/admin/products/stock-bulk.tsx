@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 
 type Row = {
   slug: string;
@@ -20,6 +21,7 @@ function normalizeStock(value: number) {
 }
 
 export default function BulkStockEditor({ rows }: Props) {
+  const router = useRouter();
   const [bulkMode, setBulkMode] = useState(false);
   const [stockDrafts, setStockDrafts] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -28,6 +30,25 @@ export default function BulkStockEditor({ rows }: Props) {
   const [isSaving, setIsSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [, startRefreshTransition] = useTransition();
+
+  useEffect(() => {
+    setCurrentRows(rows);
+
+    const validSlugs = new Set(rows.map((row) => row.slug));
+
+    setSelected((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).filter(([slug, checked]) => validSlugs.has(slug) && checked)
+      )
+    );
+
+    setStockDrafts((prev) =>
+      Object.fromEntries(
+        Object.entries(prev).filter(([slug]) => validSlugs.has(slug))
+      )
+    );
+  }, [rows]);
 
   const changedCount = useMemo(() => {
     return currentRows.reduce((count, row) => {
@@ -169,11 +190,21 @@ export default function BulkStockEditor({ rows }: Props) {
         }
         return next;
       });
+      setSelected((prev) => {
+        const next = { ...prev };
+        for (const update of updates) {
+          delete next[update.slug];
+        }
+        return next;
+      });
       setMessage(
         scope === "selected"
-          ? `Saved ${updates.length} selected stock update(s).`
-          : `Saved ${updates.length} stock update(s).`
+          ? `Saved ${updates.length} selected stock update(s). Refreshing view...`
+          : `Saved ${updates.length} stock update(s). Refreshing view...`
       );
+      startRefreshTransition(() => {
+        router.refresh();
+      });
     } catch {
       setError("Bulk stock update failed.");
     } finally {

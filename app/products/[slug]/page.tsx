@@ -44,7 +44,7 @@ export default async function ProductPage({ params }: { params: { slug: string }
               <div className="space-y-1 text-right">
                 <div className="uppercase tracking-[0.12em] text-neutral-500">Availability</div>
                 <div className="text-sm font-medium text-neutral-900">
-                  {product.archived ? "Archived" : product.stock > 0 ? `${product.stock} available` : "Unavailable"}
+                  {product.archived ? "Archived" : product.stock > 0 ? `${product.stock} available` : "Sold out"}
                 </div>
               </div>
             </div>
@@ -56,11 +56,12 @@ export default async function ProductPage({ params }: { params: { slug: string }
               image={primaryImage}
               stock={product.stock}
               unavailable={isUnavailable}
+              unavailableLabel={product.archived ? "Archived" : "Sold out"}
             />
 
             {product.stock <= 0 && !product.archived && (
               <div className="text-sm text-neutral-700">
-                <p className="mb-2">This piece is currently unavailable.</p>
+                <p className="mb-2">This piece is currently sold out.</p>
                 <div className="flex gap-3">
                   <a className="h-11 px-4 inline-flex items-center justify-center border border-neutral-300 text-sm font-semibold no-underline hover:bg-neutral-50" href="/archive">
                     View archive
