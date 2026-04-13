@@ -88,6 +88,31 @@ function parseImages(value: FormDataEntryValue | null | undefined) {
     .filter(Boolean);
 }
 
+function wantsJsonResponse(request: Request) {
+  return request.headers.get("content-type")?.includes("application/json");
+}
+
+function buildRedirectUrl(
+  request: Request,
+  payload: ProductPayload,
+  params?: {
+    saveError?: "slug_locked";
+    saveSlug?: string;
+  }
+) {
+  const redirectUrl = new URL("/admin/products", request.url);
+  if (payload.returnStatusFilter !== "all") {
+    redirectUrl.searchParams.set("status", payload.returnStatusFilter);
+  }
+  if (params?.saveError) {
+    redirectUrl.searchParams.set("saveError", params.saveError);
+  }
+  if (params?.saveSlug) {
+    redirectUrl.searchParams.set("saveSlug", params.saveSlug);
+  }
+  return redirectUrl;
+}
+
 async function getPayload(request: Request): Promise<ProductPayload | null> {
   const contentType = request.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
@@ -216,6 +241,30 @@ export async function POST(request: Request) {
   const products = Array.isArray(existing) ? existing : [];
   const originalSlug = payload.originalSlug || product.slug;
   const index = products.findIndex((item) => item.slug === originalSlug);
+  const existingProduct = index >= 0 ? products[index] : null;
+  const isOriginalLive = Boolean(existingProduct?.published) && !Boolean(existingProduct?.archived);
+  if (isOriginalLive && originalSlug !== product.slug) {
+    const message = "Live listings must be hidden or archived before their slug can be changed.";
+    if (wantsJsonResponse(request)) {
+      return Response.json(
+        {
+          ok: false,
+          error: message,
+          code: "slug_locked"
+        },
+        { status: 409 }
+      );
+    }
+
+    return Response.redirect(
+      buildRedirectUrl(request, payload, {
+        saveError: "slug_locked",
+        saveSlug: originalSlug
+      }),
+      303
+    );
+  }
+
   if (index >= 0) {
     products[index] = product;
   } else {
@@ -241,14 +290,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const wantsJson = request.headers.get("content-type")?.includes("application/json");
+  const wantsJson = wantsJsonResponse(request);
   if (wantsJson) {
     return Response.json({ ok: true, product });
   }
 
-  const redirectUrl = new URL("/admin/products", request.url);
-  if (payload.returnStatusFilter !== "all") {
-    redirectUrl.searchParams.set("status", payload.returnStatusFilter);
-  }
-  return Response.redirect(redirectUrl, 303);
+  return Response.redirect(buildRedirectUrl(request, payload), 303);
 }

@@ -1,3 +1,4 @@
+import { getReservedStock } from "@/lib/inventory";
 import { hasKvEnv, kv } from "@/lib/kv";
 import type { Product } from "@/lib/store";
 import BulkStockEditor from "./stock-bulk";
@@ -20,6 +21,14 @@ type ProductStatusBadge = {
 type FilterOption = {
   value: ProductFilterStatus;
   label: string;
+};
+
+type DeleteErrorCode = "live" | "reserved";
+type SaveErrorCode = "slug_locked";
+
+type ProductRow = {
+  product: Product;
+  reservedStock: number;
 };
 
 function formatPriceInput(priceCents: number) {
@@ -76,7 +85,24 @@ function parseFilterStatus(value: string | string[] | undefined): ProductFilterS
   return raw === "live" || raw === "sold-out" || raw === "archived" || raw === "hidden" ? raw : "all";
 }
 
-function buildFilterHref(filter: ProductFilterStatus, deletedSlug: string | null) {
+function parseDeleteErrorCode(value: string | string[] | undefined): DeleteErrorCode | null {
+  const raw = typeof value === "string" ? value : Array.isArray(value) ? value[0] : "";
+  return raw === "live" || raw === "reserved" ? raw : null;
+}
+
+function parseSaveErrorCode(value: string | string[] | undefined): SaveErrorCode | null {
+  const raw = typeof value === "string" ? value : Array.isArray(value) ? value[0] : "";
+  return raw === "slug_locked" ? raw : null;
+}
+
+function buildFilterHref(
+  filter: ProductFilterStatus,
+  deletedSlug: string | null,
+  deleteError: DeleteErrorCode | null,
+  deleteSlug: string | null,
+  saveError: SaveErrorCode | null,
+  saveSlug: string | null
+) {
   const params = new URLSearchParams();
   if (filter !== "all") {
     params.set("status", filter);
@@ -84,8 +110,52 @@ function buildFilterHref(filter: ProductFilterStatus, deletedSlug: string | null
   if (deletedSlug) {
     params.set("deleted", deletedSlug);
   }
+  if (deleteError && deleteSlug) {
+    params.set("deleteError", deleteError);
+    params.set("deleteSlug", deleteSlug);
+  }
+  if (saveError && saveSlug) {
+    params.set("saveError", saveError);
+    params.set("saveSlug", saveSlug);
+  }
   const query = params.toString();
   return query ? `/admin/products?${query}` : "/admin/products";
+}
+
+function getDeleteErrorMessage(deleteError: DeleteErrorCode | null, deleteSlug: string | null) {
+  if (!deleteError || !deleteSlug) {
+    return null;
+  }
+
+  if (deleteError === "live") {
+    return (
+      <>
+        You can&apos;t delete <code>{deleteSlug}</code> while it is live. Set the listing to{" "}
+        <span className="font-semibold">Hidden</span> or <span className="font-semibold">Archived</span>, update it,
+        then return to delete it permanently.
+      </>
+    );
+  }
+
+  return (
+    <>
+      You can&apos;t delete <code>{deleteSlug}</code> right now because an active checkout is holding inventory for it.
+      Wait for that checkout to complete or expire, then try again.
+    </>
+  );
+}
+
+function getSaveErrorMessage(saveError: SaveErrorCode | null, saveSlug: string | null) {
+  if (!saveError || !saveSlug) {
+    return null;
+  }
+
+  return (
+    <>
+      You can&apos;t change the slug for <code>{saveSlug}</code> while it is live. Hide or archive the listing first,
+      update it, then you can rename the slug if needed.
+    </>
+  );
 }
 
 async function getProducts(): Promise<Product[]> {
@@ -107,7 +177,19 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
   }
 
   const products = await getProducts();
+  const productRows: ProductRow[] = await Promise.all(
+    products.map(async (product) => ({
+      product,
+      reservedStock: await getReservedStock(product.slug)
+    }))
+  );
   const deletedSlug = typeof searchParams?.deleted === "string" ? searchParams.deleted : null;
+  const deleteError = parseDeleteErrorCode(searchParams?.deleteError);
+  const deleteSlug = typeof searchParams?.deleteSlug === "string" ? searchParams.deleteSlug : null;
+  const deleteErrorMessage = getDeleteErrorMessage(deleteError, deleteSlug);
+  const saveError = parseSaveErrorCode(searchParams?.saveError);
+  const saveSlug = typeof searchParams?.saveSlug === "string" ? searchParams.saveSlug : null;
+  const saveErrorMessage = getSaveErrorMessage(saveError, saveSlug);
   const activeFilter = parseFilterStatus(searchParams?.status);
   const filterOptions: FilterOption[] = [
     { value: "all", label: "All" },
@@ -117,16 +199,16 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
     { value: "hidden", label: "Hidden" }
   ];
   const filterCounts = {
-    all: products.length,
-    live: products.filter((product) => getProductFilterStatus(product) === "live").length,
-    "sold-out": products.filter((product) => getProductFilterStatus(product) === "sold-out").length,
-    archived: products.filter((product) => getProductFilterStatus(product) === "archived").length,
-    hidden: products.filter((product) => getProductFilterStatus(product) === "hidden").length
+    all: productRows.length,
+    live: productRows.filter(({ product }) => getProductFilterStatus(product) === "live").length,
+    "sold-out": productRows.filter(({ product }) => getProductFilterStatus(product) === "sold-out").length,
+    archived: productRows.filter(({ product }) => getProductFilterStatus(product) === "archived").length,
+    hidden: productRows.filter(({ product }) => getProductFilterStatus(product) === "hidden").length
   };
-  const filteredProducts =
+  const filteredRows =
     activeFilter === "all"
-      ? products
-      : products.filter((product) => getProductFilterStatus(product) === activeFilter);
+      ? productRows
+      : productRows.filter(({ product }) => getProductFilterStatus(product) === activeFilter);
   const activeFilterLabel = filterOptions.find((option) => option.value === activeFilter)?.label || "All";
 
   return (
@@ -145,6 +227,16 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
         {deletedSlug ? (
           <p className="text-sm text-emerald-700">Deleted listing: <code>{deletedSlug}</code></p>
         ) : null}
+        {deleteErrorMessage ? (
+          <div className="border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {deleteErrorMessage}
+          </div>
+        ) : null}
+        {saveErrorMessage ? (
+          <div className="border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {saveErrorMessage}
+          </div>
+        ) : null}
       </header>
 
       <section className="space-y-3">
@@ -154,7 +246,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
             return (
               <a
                 key={option.value}
-                href={buildFilterHref(option.value, deletedSlug)}
+                href={buildFilterHref(option.value, deletedSlug, deleteError, deleteSlug, saveError, saveSlug)}
                 className={`inline-flex items-center gap-2 border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] no-underline transition-colors ${
                   isActive
                     ? "border-neutral-900 bg-neutral-900 text-white"
@@ -177,7 +269,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
       </section>
 
       <BulkStockEditor
-        rows={filteredProducts.map((product) => ({
+        rows={filteredRows.map(({ product }) => ({
           slug: product.slug,
           title: product.title,
           stock: product.stock
@@ -271,13 +363,40 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
 
       <section className="space-y-4">
         <h2 className="text-sm font-semibold tracking-tight">Existing Products</h2>
-        {filteredProducts.length === 0 ? (
+        {filteredRows.length === 0 ? (
           <div className="border border-neutral-200 p-6 text-sm text-neutral-600">
             {activeFilter === "all" ? "No products yet." : `No ${activeFilterLabel.toLowerCase()} products yet.`}
           </div>
         ) : (
-          filteredProducts.map((product) => {
+          filteredRows.map(({ product, reservedStock }) => {
             const statusBadge = getProductStatusBadge(product);
+            const productStatus = getProductStatus(product);
+            const slugLocked = productStatus === "live";
+            const deleteBlockedByLive = productStatus === "live";
+            const deleteBlockedByReservation = reservedStock > 0;
+            const deleteBlocked = deleteBlockedByLive || deleteBlockedByReservation;
+            const deleteGuidance = deleteBlockedByLive
+              ? (
+                  <>
+                    To permanently delete this listing: first change <span className="font-semibold">Status</span> to{" "}
+                    <span className="font-semibold">Hidden</span> or <span className="font-semibold">Archived</span>,
+                    click <span className="font-semibold">Update Product</span>, then return here to delete it.
+                  </>
+                )
+              : deleteBlockedByReservation
+                ? (
+                    <>
+                      Deletion is temporarily blocked because {reservedStock} item{reservedStock === 1 ? "" : "s"}{" "}
+                      {reservedStock === 1 ? "is" : "are"} currently held in an active checkout. Wait for that
+                      checkout to complete or expire, then delete it.
+                    </>
+                  )
+                : (
+                    <>
+                      This listing is no longer public and can now be permanently removed from Redis. Type the slug
+                      exactly to confirm deletion.
+                    </>
+                  );
 
             return (
             <div key={product.slug} className="border border-neutral-200 p-6 space-y-4">
@@ -298,13 +417,25 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                 <input type="hidden" name="originalSlug" value={product.slug} />
                 <input type="hidden" name="returnStatusFilter" value={activeFilter} />
                 <label className="grid gap-1">
-                  <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Slug</span>
+                  <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">
+                    Slug{slugLocked ? " (locked while live)" : ""}
+                  </span>
                   <input
                     name="slug"
                     required
-                    className="h-10 border border-neutral-300 px-3"
+                    className={`h-10 border px-3 ${
+                      slugLocked
+                        ? "border-neutral-200 bg-neutral-50 text-neutral-500"
+                        : "border-neutral-300"
+                    }`}
                     defaultValue={product.slug}
+                    readOnly={slugLocked}
                   />
+                  <p className="text-[11px] text-neutral-500">
+                    {slugLocked
+                      ? "This listing is live, so the URL slug is locked. Hide or archive it first if you need to rename the slug."
+                      : "Slug controls the product URL. Only rename hidden or archived listings."}
+                  </p>
                 </label>
                 <label className="grid gap-1">
                   <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Title</span>
@@ -433,8 +564,10 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                 <div className="space-y-1">
                   <h3 className="text-xs uppercase tracking-[0.12em] text-red-700">Delete Listing</h3>
                   <p className="text-xs text-neutral-600">
-                    Type <code>{product.slug}</code> to permanently remove this listing from Redis. Product page URLs
-                    will stop resolving once deleted.
+                    {deleteGuidance}
+                  </p>
+                  <p className="text-xs text-neutral-500">
+                    Product page URLs stop resolving once a listing is deleted.
                   </p>
                 </div>
                 <label className="grid gap-1">
@@ -444,9 +577,13 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                     className="h-10 border border-neutral-300 px-3"
                     placeholder={product.slug}
                     required
+                    disabled={deleteBlocked}
                   />
                 </label>
-                <button className="h-11 border border-red-300 text-red-700 font-semibold hover:bg-red-50">
+                <button
+                  className="h-11 border border-red-300 text-red-700 font-semibold hover:bg-red-50 disabled:cursor-not-allowed disabled:border-neutral-200 disabled:text-neutral-400 disabled:hover:bg-transparent"
+                  disabled={deleteBlocked}
+                >
                   Delete Listing
                 </button>
               </form>

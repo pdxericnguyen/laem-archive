@@ -1,5 +1,6 @@
 import { del as deleteBlob } from "@vercel/blob";
 
+import { getReservedStock } from "@/lib/inventory";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import type { Product } from "@/lib/store";
@@ -16,6 +17,62 @@ function asString(value: unknown) {
 
 function normalizeReturnStatusFilter(value: unknown): DeletePayload["returnStatusFilter"] {
   return value === "live" || value === "sold-out" || value === "archived" || value === "hidden" ? value : "all";
+}
+
+function wantsJsonResponse(request: Request) {
+  return request.headers.get("content-type")?.includes("application/json");
+}
+
+function buildRedirectUrl(
+  request: Request,
+  payload: DeletePayload,
+  params?: {
+    deleted?: string;
+    deleteError?: "live" | "reserved";
+    deleteSlug?: string;
+  }
+) {
+  const redirectUrl = new URL("/admin/products", request.url);
+  if (payload.returnStatusFilter !== "all") {
+    redirectUrl.searchParams.set("status", payload.returnStatusFilter);
+  }
+  if (params?.deleted) {
+    redirectUrl.searchParams.set("deleted", params.deleted);
+  }
+  if (params?.deleteError) {
+    redirectUrl.searchParams.set("deleteError", params.deleteError);
+  }
+  if (params?.deleteSlug) {
+    redirectUrl.searchParams.set("deleteSlug", params.deleteSlug);
+  }
+  return redirectUrl;
+}
+
+function errorResponse(
+  request: Request,
+  payload: DeletePayload,
+  status: number,
+  deleteError: "live" | "reserved",
+  message: string
+) {
+  if (wantsJsonResponse(request)) {
+    return Response.json(
+      {
+        ok: false,
+        error: message,
+        code: deleteError
+      },
+      { status }
+    );
+  }
+
+  return Response.redirect(
+    buildRedirectUrl(request, payload, {
+      deleteError,
+      deleteSlug: payload.slug
+    }),
+    303
+  );
 }
 
 async function getPayload(request: Request): Promise<DeletePayload | null> {
@@ -91,6 +148,28 @@ export async function POST(request: Request) {
     return new Response("Product not found", { status: 404 });
   }
 
+  const isLive = product.published && !product.archived;
+  if (isLive) {
+    return errorResponse(
+      request,
+      payload,
+      409,
+      "live",
+      "Live listings must be hidden or archived before they can be permanently deleted."
+    );
+  }
+
+  const reservedStock = await getReservedStock(payload.slug);
+  if (reservedStock > 0) {
+    return errorResponse(
+      request,
+      payload,
+      409,
+      "reserved",
+      "This listing has an active checkout hold and cannot be deleted until the checkout completes or expires."
+    );
+  }
+
   const nextProducts = products.filter((item) => item.slug !== payload.slug);
   await kv.set(key.products, nextProducts);
   await kv.del(key.product(payload.slug));
@@ -111,15 +190,15 @@ export async function POST(request: Request) {
     }
   }
 
-  const wantsJson = request.headers.get("content-type")?.includes("application/json");
+  const wantsJson = wantsJsonResponse(request);
   if (wantsJson) {
     return Response.json({ ok: true, slug: payload.slug });
   }
 
-  const redirectUrl = new URL("/admin/products", request.url);
-  redirectUrl.searchParams.set("deleted", payload.slug);
-  if (payload.returnStatusFilter !== "all") {
-    redirectUrl.searchParams.set("status", payload.returnStatusFilter);
-  }
-  return Response.redirect(redirectUrl, 303);
+  return Response.redirect(
+    buildRedirectUrl(request, payload, {
+      deleted: payload.slug
+    }),
+    303
+  );
 }
