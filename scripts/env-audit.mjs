@@ -17,11 +17,19 @@ const requiredAnyOf = [
 ];
 
 const optionalVars = [
+  "STRIPE_TERMINAL_LOCATION_ID",
+  "POS_APP_TOKEN",
+  "POS_SESSION_SECRET",
+  "POS_SESSION_TTL_SECONDS",
+  "POS_CURRENCY",
   "INVENTORY_ALERT_EMAIL",
   "ADMIN_ALERT_EMAIL",
   "LOW_STOCK_THRESHOLD",
+  "CHECKOUT_RESERVATION_TTL_SECONDS",
   "RATE_LIMIT_LOGIN_MAX",
   "RATE_LIMIT_LOGIN_WINDOW_SECONDS",
+  "RATE_LIMIT_POS_LOGIN_MAX",
+  "RATE_LIMIT_POS_LOGIN_WINDOW_SECONDS",
   "RATE_LIMIT_CHECKOUT_MAX",
   "RATE_LIMIT_CHECKOUT_WINDOW_SECONDS"
 ];
@@ -119,6 +127,15 @@ function main() {
     String(env.STRIPE_WEBHOOK_SECRET).startsWith("whsec_") === false
   ) {
     warnings.push("STRIPE_WEBHOOK_SECRET does not look like a Stripe webhook secret.");
+  }
+  if (isSet(env.POS_CURRENCY) && /^[a-z]{3}$/i.test(String(env.POS_CURRENCY)) === false) {
+    warnings.push("POS_CURRENCY should be a three-letter ISO currency code such as usd.");
+  }
+  if (!isSet(env.POS_APP_TOKEN)) {
+    warnings.push("POS_APP_TOKEN is not set; POS login will fall back to ADMIN_TOKEN.");
+  }
+  if (!isSet(env.POS_SESSION_SECRET)) {
+    warnings.push("POS_SESSION_SECRET is not set; POS sessions will fall back to ADMIN_SESSION_SECRET or token envs.");
   }
 
   console.log("Environment audit");

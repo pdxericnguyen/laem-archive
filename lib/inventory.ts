@@ -144,11 +144,40 @@ export type StockRequest = {
   quantity: number;
 };
 
+export type CheckoutReservationStatus = "active" | "completed" | "released" | "expired";
+
+export type CheckoutReservationRecord = {
+  sessionId: string;
+  items: StockRequest[];
+  createdAt: number;
+  expiresAt: number;
+  status: CheckoutReservationStatus;
+  updatedAt?: number;
+};
+
 export type MultiAtomicDecrementResult = {
   ok: boolean;
   items: Array<AtomicDecrementResult & { slug: string }>;
   reason?: "invalid_request" | "insufficient_stock";
   failedSlug?: string;
+};
+
+export type ReserveInventoryResult = {
+  ok: boolean;
+  expiresAt?: number;
+  failedSlug?: string;
+  available?: number;
+  reason?: "invalid_request" | "insufficient_stock";
+};
+
+export type ReleaseInventoryReservationResult = {
+  ok: boolean;
+  status: "released" | "missing" | "inactive";
+  reservation?: CheckoutReservationRecord | null;
+};
+
+export type ConsumeInventoryReservationResult = MultiAtomicDecrementResult & {
+  source: "reservation" | "stock";
 };
 
 function parseNumberResult(value: unknown, fallback = 0) {
@@ -170,6 +199,14 @@ function getLowStockThreshold() {
     return 2;
   }
   return Math.max(1, Math.floor(configured));
+}
+
+export function getCheckoutReservationTtlSeconds() {
+  const configured = Number(process.env.CHECKOUT_RESERVATION_TTL_SECONDS || "1800");
+  if (!Number.isFinite(configured)) {
+    return 1800;
+  }
+  return Math.max(1800, Math.min(86400, Math.floor(configured)));
 }
 
 function getStockTransition(previous: number, next: number): StockTransition | null {
@@ -196,6 +233,463 @@ async function ensureStockKey(slug: string) {
   const baseline = Math.max(0, Math.floor(product?.stock || 0));
   await kv.set(key.stock(slug), baseline);
   return baseline;
+}
+
+function normalizeReservationStatus(value: unknown): CheckoutReservationStatus | null {
+  return value === "active" || value === "completed" || value === "released" || value === "expired"
+    ? value
+    : null;
+}
+
+function buildReservationHash(
+  sessionId: string,
+  items: StockRequest[],
+  status: CheckoutReservationStatus,
+  createdAt: number,
+  expiresAt: number,
+  updatedAt?: number
+) {
+  const payload: Record<string, number | string> = {
+    sessionId,
+    status,
+    createdAt,
+    expiresAt
+  };
+  if (typeof updatedAt === "number" && Number.isFinite(updatedAt)) {
+    payload.updatedAt = updatedAt;
+  }
+
+  for (const item of items) {
+    payload[`item:${item.slug}`] = Math.max(1, Math.floor(item.quantity));
+  }
+
+  return payload;
+}
+
+export async function readInventoryReservation(sessionId: string): Promise<CheckoutReservationRecord | null> {
+  const raw = await kv.hgetall<Record<string, unknown>>(key.reservation(sessionId));
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return null;
+  }
+
+  const status = normalizeReservationStatus(raw.status);
+  const createdAt = Math.max(0, Math.floor(parseNumberResult(raw.createdAt)));
+  const expiresAt = Math.max(0, Math.floor(parseNumberResult(raw.expiresAt)));
+  const updatedAtRaw = Math.max(0, Math.floor(parseNumberResult(raw.updatedAt)));
+  const items = Object.entries(raw)
+    .filter(([field]) => field.startsWith("item:"))
+    .map(([field, value]) => {
+      const slug = field.slice("item:".length).trim();
+      const quantity = Math.max(1, Math.floor(parseNumberResult(value)));
+      if (!slug || quantity <= 0) {
+        return null;
+      }
+      return {
+        slug,
+        quantity
+      };
+    })
+    .filter((item): item is StockRequest => Boolean(item));
+
+  if (!status || createdAt <= 0 || expiresAt <= 0 || items.length === 0) {
+    return null;
+  }
+
+  return {
+    sessionId,
+    items,
+    createdAt,
+    expiresAt,
+    status,
+    updatedAt: updatedAtRaw > 0 ? updatedAtRaw : undefined
+  };
+}
+
+export async function getReservedStock(slug: string): Promise<number> {
+  const reserved = await kv.get<number>(key.reserved(slug));
+  if (typeof reserved !== "number" || !Number.isFinite(reserved)) {
+    return 0;
+  }
+  return Math.max(0, Math.floor(reserved));
+}
+
+export async function getAvailableStock(slug: string): Promise<number> {
+  const [stock, reserved] = await Promise.all([getStock(slug), getReservedStock(slug)]);
+  return Math.max(0, stock - reserved);
+}
+
+export async function reserveInventoryForCheckoutSession(
+  sessionId: string,
+  input: StockRequest[],
+  expiresAt: number
+): Promise<ReserveInventoryResult> {
+  const requests = normalizeRequests(input);
+  if (!sessionId || requests.length === 0) {
+    return { ok: false, reason: "invalid_request" };
+  }
+
+  for (const request of requests) {
+    await ensureStockKey(request.slug);
+  }
+
+  const createdAt = Math.floor(Date.now() / 1000);
+  const ttlExpiry = Math.max(createdAt + 60, Math.floor(expiresAt));
+  const script = `
+local count = tonumber(ARGV[1]) or 0
+local sessionId = ARGV[2]
+local createdAt = tonumber(ARGV[3]) or 0
+local expiresAt = tonumber(ARGV[4]) or 0
+local reservationKey = KEYS[count * 2 + 1]
+local reservationsIndexKey = KEYS[count * 2 + 2]
+
+local existingStatus = redis.call("HGET", reservationKey, "status")
+if existingStatus == "active" then
+  return {1, 0, 0}
+end
+
+for i = 1, count do
+  local stock = tonumber(redis.call("GET", KEYS[i]) or "0") or 0
+  local reserved = tonumber(redis.call("GET", KEYS[count + i]) or "0") or 0
+  local qty = tonumber(ARGV[4 + i]) or 0
+  if stock < 0 then
+    stock = 0
+  end
+  if reserved < 0 then
+    reserved = 0
+  end
+  local available = stock - reserved
+  if available < qty then
+    return {0, i, available}
+  end
+end
+
+for i = 1, count do
+  local qty = tonumber(ARGV[4 + i]) or 0
+  redis.call("INCRBY", KEYS[count + i], qty)
+end
+
+redis.call("HSET", reservationKey, "sessionId", sessionId, "status", "active", "createdAt", createdAt, "expiresAt", expiresAt)
+for i = 1, count do
+  local slug = ARGV[4 + count + i]
+  local qty = tonumber(ARGV[4 + i]) or 0
+  redis.call("HSET", reservationKey, "item:" .. slug, qty)
+end
+redis.call("ZADD", reservationsIndexKey, expiresAt, sessionId)
+redis.call("EXPIREAT", reservationKey, expiresAt + 604800)
+return {1, 0, 0}
+`;
+
+  const keys = [
+    ...requests.map((request) => key.stock(request.slug)),
+    ...requests.map((request) => key.reserved(request.slug)),
+    key.reservation(sessionId),
+    key.reservationsExpiring
+  ];
+  const args = [
+    String(requests.length),
+    sessionId,
+    String(createdAt),
+    String(ttlExpiry),
+    ...requests.map((request) => String(request.quantity)),
+    ...requests.map((request) => request.slug)
+  ];
+
+  try {
+    const response = (await kv.eval(script, keys, args)) as unknown;
+    if (Array.isArray(response)) {
+      const ok = parseNumberResult(response[0]) === 1;
+      if (ok) {
+        return { ok: true, expiresAt: ttlExpiry };
+      }
+      const failedIndex = Math.max(1, Math.floor(parseNumberResult(response[1])));
+      const failedSlug = requests[failedIndex - 1]?.slug;
+      const available = Math.max(0, Math.floor(parseNumberResult(response[2])));
+      return {
+        ok: false,
+        reason: "insufficient_stock",
+        failedSlug,
+        available
+      };
+    }
+  } catch (error) {
+    console.error("Inventory reservation eval failed; falling back to sequential reserve", {
+      error,
+      sessionId,
+      requests
+    });
+  }
+
+  const existing = await readInventoryReservation(sessionId);
+  if (existing?.status === "active") {
+    return { ok: true, expiresAt: existing.expiresAt };
+  }
+
+  for (const request of requests) {
+    const available = await getAvailableStock(request.slug);
+    if (available < request.quantity) {
+      return {
+        ok: false,
+        reason: "insufficient_stock",
+        failedSlug: request.slug,
+        available
+      };
+    }
+  }
+
+  for (const request of requests) {
+    await kv.incrby(key.reserved(request.slug), request.quantity);
+  }
+  await kv.hset(key.reservation(sessionId), buildReservationHash(sessionId, requests, "active", createdAt, ttlExpiry));
+  await kv.zadd(key.reservationsExpiring, {
+    score: ttlExpiry,
+    member: sessionId
+  });
+  await kv.expireat(key.reservation(sessionId), ttlExpiry + 604800);
+
+  return { ok: true, expiresAt: ttlExpiry };
+}
+
+export async function releaseInventoryReservation(
+  sessionId: string,
+  nextStatus: CheckoutReservationStatus = "released",
+  updatedAt = Math.floor(Date.now() / 1000)
+): Promise<ReleaseInventoryReservationResult> {
+  const reservation = await readInventoryReservation(sessionId);
+  if (!reservation) {
+    await kv.zrem(key.reservationsExpiring, sessionId);
+    return { ok: false, status: "missing", reservation: null };
+  }
+
+  if (reservation.status !== "active") {
+    await kv.zrem(key.reservationsExpiring, sessionId);
+    return { ok: false, status: "inactive", reservation };
+  }
+
+  const script = `
+local count = tonumber(ARGV[1]) or 0
+local nextStatus = ARGV[2]
+local updatedAt = tonumber(ARGV[3]) or 0
+local reservationKey = KEYS[1]
+local reservationsIndexKey = KEYS[2]
+local sessionId = ARGV[4]
+
+local status = redis.call("HGET", reservationKey, "status")
+if status ~= "active" then
+  return {0}
+end
+
+for i = 1, count do
+  local reservedKey = KEYS[2 + i]
+  local qty = tonumber(ARGV[4 + i]) or 0
+  local currentReserved = tonumber(redis.call("GET", reservedKey) or "0") or 0
+  if currentReserved < 0 then
+    currentReserved = 0
+  end
+  local nextReserved = currentReserved - qty
+  if nextReserved < 0 then
+    nextReserved = 0
+  end
+  redis.call("SET", reservedKey, nextReserved)
+end
+
+redis.call("HSET", reservationKey, "status", nextStatus, "updatedAt", updatedAt)
+redis.call("ZREM", reservationsIndexKey, sessionId)
+return {1}
+`;
+
+  const keys = [
+    key.reservation(sessionId),
+    key.reservationsExpiring,
+    ...reservation.items.map((item) => key.reserved(item.slug))
+  ];
+  const args = [
+    String(reservation.items.length),
+    nextStatus,
+    String(updatedAt),
+    sessionId,
+    ...reservation.items.map((item) => String(item.quantity))
+  ];
+
+  try {
+    await kv.eval(script, keys, args);
+    return { ok: true, status: "released", reservation };
+  } catch (error) {
+    console.error("Inventory reservation release eval failed; falling back to sequential release", {
+      error,
+      sessionId
+    });
+  }
+
+  for (const item of reservation.items) {
+    const currentReserved = await getReservedStock(item.slug);
+    const nextReserved = Math.max(0, currentReserved - item.quantity);
+    await kv.set(key.reserved(item.slug), nextReserved);
+  }
+  await kv.hset(
+    key.reservation(sessionId),
+    buildReservationHash(sessionId, reservation.items, nextStatus, reservation.createdAt, reservation.expiresAt, updatedAt)
+  );
+  await kv.zrem(key.reservationsExpiring, sessionId);
+  return { ok: true, status: "released", reservation };
+}
+
+export async function cleanupExpiredInventoryReservations(limit = 25) {
+  const now = Math.floor(Date.now() / 1000);
+  const batchSize = Math.max(1, Math.floor(limit));
+  const expiredSessionIds =
+    (await kv.zrange<string[]>(
+      key.reservationsExpiring,
+      "-inf",
+      now,
+      {
+        byScore: true,
+        offset: 0,
+        count: batchSize
+      }
+    )) || [];
+
+  let released = 0;
+  for (const sessionId of expiredSessionIds) {
+    if (typeof sessionId !== "string" || !sessionId) {
+      continue;
+    }
+    const result = await releaseInventoryReservation(sessionId, "expired", now);
+    if (result.ok) {
+      released += 1;
+    }
+  }
+
+  return {
+    checked: expiredSessionIds.length,
+    released
+  };
+}
+
+export async function consumeInventoryReservation(
+  sessionId: string
+): Promise<ConsumeInventoryReservationResult | null> {
+  const reservation = await readInventoryReservation(sessionId);
+  if (!reservation) {
+    return null;
+  }
+
+  if (reservation.status !== "active") {
+    return null;
+  }
+
+  for (const item of reservation.items) {
+    await ensureStockKey(item.slug);
+  }
+
+  const updatedAt = Math.floor(Date.now() / 1000);
+  const script = `
+local count = tonumber(ARGV[1]) or 0
+local updatedAt = tonumber(ARGV[2]) or 0
+local sessionId = ARGV[3]
+local reservationKey = KEYS[1]
+local reservationsIndexKey = KEYS[2]
+
+local status = redis.call("HGET", reservationKey, "status")
+if status ~= "active" then
+  return {0}
+end
+
+local out = {1}
+for i = 1, count do
+  local stockKey = KEYS[2 + i]
+  local reservedKey = KEYS[2 + count + i]
+  local qty = tonumber(ARGV[3 + i]) or 0
+  local currentStock = tonumber(redis.call("GET", stockKey) or "0") or 0
+  local currentReserved = tonumber(redis.call("GET", reservedKey) or "0") or 0
+  if currentStock < 0 then
+    currentStock = 0
+  end
+  if currentReserved < 0 then
+    currentReserved = 0
+  end
+
+  local nextStock = currentStock - qty
+  if nextStock < 0 then
+    nextStock = 0
+  end
+
+  local nextReserved = currentReserved - qty
+  if nextReserved < 0 then
+    nextReserved = 0
+  end
+
+  redis.call("SET", stockKey, nextStock)
+  redis.call("SET", reservedKey, nextReserved)
+  table.insert(out, currentStock)
+  table.insert(out, nextStock)
+end
+
+redis.call("HSET", reservationKey, "status", "completed", "updatedAt", updatedAt)
+redis.call("ZREM", reservationsIndexKey, sessionId)
+return out
+`;
+
+  const keys = [
+    key.reservation(sessionId),
+    key.reservationsExpiring,
+    ...reservation.items.map((item) => key.stock(item.slug)),
+    ...reservation.items.map((item) => key.reserved(item.slug))
+  ];
+  const args = [
+    String(reservation.items.length),
+    String(updatedAt),
+    sessionId,
+    ...reservation.items.map((item) => String(item.quantity))
+  ];
+
+  try {
+    const response = (await kv.eval(script, keys, args)) as unknown;
+    if (Array.isArray(response) && parseNumberResult(response[0]) === 1) {
+      return {
+        ok: true,
+        source: "reservation",
+        items: reservation.items.map((item, index) => {
+          const current = Math.max(0, Math.floor(parseNumberResult(response[1 + index * 2])));
+          const next = Math.max(0, Math.floor(parseNumberResult(response[2 + index * 2], current)));
+          return {
+            slug: item.slug,
+            ...toResult(item.quantity, true, current, next)
+          };
+        })
+      };
+    }
+  } catch (error) {
+    console.error("Reservation consume eval failed; falling back to sequential consume", {
+      error,
+      sessionId
+    });
+  }
+
+  const items = [];
+  for (const item of reservation.items) {
+    const currentStock = await getStock(item.slug);
+    const currentReserved = await getReservedStock(item.slug);
+    const nextStock = Math.max(0, currentStock - item.quantity);
+    const nextReserved = Math.max(0, currentReserved - item.quantity);
+    await kv.set(key.stock(item.slug), nextStock);
+    await kv.set(key.reserved(item.slug), nextReserved);
+    items.push({
+      slug: item.slug,
+      ...toResult(item.quantity, true, currentStock, nextStock)
+    });
+  }
+
+  await kv.hset(
+    key.reservation(sessionId),
+    buildReservationHash(sessionId, reservation.items, "completed", reservation.createdAt, reservation.expiresAt, updatedAt)
+  );
+  await kv.zrem(key.reservationsExpiring, sessionId);
+
+  return {
+    ok: true,
+    source: "reservation",
+    items
+  };
 }
 
 function toResult(

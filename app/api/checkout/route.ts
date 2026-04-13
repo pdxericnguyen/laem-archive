@@ -1,6 +1,13 @@
 import Stripe from "stripe";
 
-import { getProduct, getStock } from "@/lib/inventory";
+import {
+  cleanupExpiredInventoryReservations,
+  getAvailableStock,
+  getCheckoutReservationTtlSeconds,
+  getProduct,
+  releaseInventoryReservation,
+  reserveInventoryForCheckoutSession
+} from "@/lib/inventory";
 import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
@@ -107,6 +114,16 @@ function jsonResponse(payload: unknown, status: number, headers: HeadersInit) {
   });
 }
 
+function formatAvailabilityError(slug: string, available: number) {
+  if (available <= 0) {
+    return `Out of stock: ${slug}`;
+  }
+  if (available === 1) {
+    return `Only 1 left for ${slug}`;
+  }
+  return `Only ${available} left for ${slug}`;
+}
+
 export async function POST(request: Request) {
   const rateLimit = await applyRateLimit(request, {
     namespace: "checkout",
@@ -149,6 +166,8 @@ export async function POST(request: Request) {
     apiVersion: "2023-10-16"
   });
 
+  await cleanupExpiredInventoryReservations();
+
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
   for (const requested of items) {
     const product = await getProduct(requested.slug);
@@ -159,16 +178,16 @@ export async function POST(request: Request) {
         : new Response(errorMessage, { status: 404, headers: rateLimitHeaders });
     }
 
-    const stock = await getStock(requested.slug);
-    if (!stock || stock <= 0) {
-      const errorMessage = `Out of stock: ${requested.slug}`;
+    const available = await getAvailableStock(requested.slug);
+    if (!available || available <= 0) {
+      const errorMessage = formatAvailabilityError(requested.slug, 0);
       return wantsJson
         ? jsonResponse({ ok: false, error: errorMessage }, 400, rateLimitHeaders)
         : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
     }
 
-    if (requested.quantity > stock) {
-      const errorMessage = `Requested quantity exceeds stock for ${requested.slug}`;
+    if (requested.quantity > available) {
+      const errorMessage = formatAvailabilityError(requested.slug, available);
       return wantsJson
         ? jsonResponse({ ok: false, error: errorMessage }, 400, rateLimitHeaders)
         : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
@@ -201,11 +220,13 @@ export async function POST(request: Request) {
   const cancelUrl = singleSlug
     ? `${baseUrl}/products/${singleSlug}?canceled=1`
     : `${baseUrl}/cart?canceled=1`;
+  const expiresAt = Math.floor(Date.now() / 1000) + getCheckoutReservationTtlSeconds();
 
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     success_url: successUrl,
     cancel_url: cancelUrl,
+    expires_at: expiresAt,
     line_items: lineItems,
     metadata: {
       cart: serializeCartMetadata(items),
@@ -213,7 +234,35 @@ export async function POST(request: Request) {
     }
   });
 
+  const reservation = await reserveInventoryForCheckoutSession(session.id, items, session.expires_at || expiresAt);
+  if (!reservation.ok) {
+    try {
+      await stripe.checkout.sessions.expire(session.id);
+    } catch (error) {
+      console.error("Unable to expire checkout session after reservation failure", {
+        sessionId: session.id,
+        error
+      });
+    }
+
+    const available = Math.max(0, Math.floor(reservation.available || 0));
+    const failedSlug = reservation.failedSlug || items[0]?.slug || "item";
+    const errorMessage = formatAvailabilityError(failedSlug, available);
+    return wantsJson
+      ? jsonResponse({ ok: false, error: errorMessage }, 409, rateLimitHeaders)
+      : new Response(errorMessage, { status: 409, headers: rateLimitHeaders });
+  }
+
   if (!session.url) {
+    await releaseInventoryReservation(session.id);
+    try {
+      await stripe.checkout.sessions.expire(session.id);
+    } catch (error) {
+      console.error("Unable to expire checkout session without session url", {
+        sessionId: session.id,
+        error
+      });
+    }
     const errorMessage = "Unable to create checkout session";
     return wantsJson
       ? jsonResponse({ ok: false, error: errorMessage }, 500, rateLimitHeaders)
