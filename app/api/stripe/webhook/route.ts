@@ -10,9 +10,58 @@ import {
 } from "@/lib/inventory";
 import { appendOrderToIndex, hasOrder, writeOrder, type OrderChannel, type StripeObjectType } from "@/lib/orders";
 import { sendInventoryAlertEmail, sendOrderReceivedEmail } from "@/lib/email";
-import { parsePOSCartMetadata } from "@/lib/pos";
 
 export const runtime = "nodejs";
+
+function asPositiveInt(value: unknown, fallback: number) {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(1, Math.floor(parsed));
+}
+
+function normalizeCartItem(rawSlug: unknown, rawQuantity: unknown): StockRequest | null {
+  const slug = typeof rawSlug === "string" ? rawSlug.trim() : "";
+  const quantity =
+    rawQuantity === undefined || rawQuantity === null || rawQuantity === ""
+      ? 1
+      : asPositiveInt(rawQuantity, 0);
+  if (!slug || quantity <= 0) {
+    return null;
+  }
+  return {
+    slug,
+    quantity
+  };
+}
+
+function collapseCartItems(items: StockRequest[]) {
+  const grouped = new Map<string, number>();
+  for (const item of items) {
+    grouped.set(item.slug, (grouped.get(item.slug) || 0) + item.quantity);
+  }
+  return [...grouped.entries()].map(([slug, quantity]) => ({
+    slug,
+    quantity
+  }));
+}
+
+function parseCartMetadata(value: string | null | undefined): StockRequest[] {
+  if (!value || typeof value !== "string") {
+    return [];
+  }
+
+  return collapseCartItems(
+    value
+      .split(",")
+      .map((entry) => {
+        const [slugRaw, quantityRaw] = entry.split(":");
+        return normalizeCartItem(slugRaw, quantityRaw);
+      })
+      .filter((row): row is StockRequest => Boolean(row))
+  );
+}
 
 async function getLineItemQuantity(stripe: Stripe, sessionId: string) {
   const lineItems = await stripe.checkout.sessions.listLineItems(sessionId, {
@@ -23,7 +72,7 @@ async function getLineItemQuantity(stripe: Stripe, sessionId: string) {
 }
 
 async function getPurchasedItems(stripe: Stripe, session: Stripe.Checkout.Session) {
-  const fromMetadata = parsePOSCartMetadata(session.metadata?.cart);
+  const fromMetadata = parseCartMetadata(session.metadata?.cart);
   if (fromMetadata.length > 0) {
     return fromMetadata;
   }
@@ -241,7 +290,7 @@ export async function POST(request: Request) {
       return new Response("Ignored", { status: 200 });
     }
 
-    const purchasedItems = parsePOSCartMetadata(paymentIntent.metadata?.cart);
+    const purchasedItems = parseCartMetadata(paymentIntent.metadata?.cart);
     if (purchasedItems.length === 0) {
       return new Response("Missing cart metadata", { status: 400 });
     }
