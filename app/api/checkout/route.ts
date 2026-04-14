@@ -214,9 +214,7 @@ export async function POST(request: Request) {
 
   const baseUrl = normalizeSiteUrl(siteUrl);
   const singleSlug = items.length === 1 ? items[0].slug : null;
-  const successUrl = singleSlug
-    ? `${baseUrl}/products/${singleSlug}?success=1&session_id={CHECKOUT_SESSION_ID}`
-    : `${baseUrl}/cart?success=1&session_id={CHECKOUT_SESSION_ID}`;
+  const successUrl = `${baseUrl}/cart?success=1&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = singleSlug
     ? `${baseUrl}/products/${singleSlug}?canceled=1`
     : `${baseUrl}/cart?canceled=1`;
