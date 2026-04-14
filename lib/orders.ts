@@ -2,6 +2,8 @@ import { key, kv } from "@/lib/kv";
 
 export type OrderStatus = "paid" | "shipped" | "stock_conflict" | "conflict_resolved";
 export type OrderStatusFilter = "all" | OrderStatus;
+export type OrderChannel = "checkout" | "terminal";
+export type StripeObjectType = "checkout_session" | "payment_intent";
 
 export type OrderShipping = {
   carrier: string;
@@ -30,6 +32,8 @@ export type OrderRecord = {
   status: OrderStatus;
   amount_total: number | null;
   currency: string | null;
+  channel?: OrderChannel;
+  stripeObjectType?: StripeObjectType;
   shipping?: OrderShipping;
   conflictResolution?: OrderConflictResolution;
 };
@@ -47,6 +51,9 @@ type LooseOrderRecord = {
   amount_total?: unknown;
   amountTotal?: unknown;
   currency?: unknown;
+  channel?: unknown;
+  stripeObjectType?: unknown;
+  stripe_object_type?: unknown;
   items?: Array<{ slug?: unknown; quantity?: unknown }> | null;
   shipping?: {
     carrier?: unknown;
@@ -76,6 +83,27 @@ function normalizeStatus(value: unknown): OrderStatus {
     return "conflict_resolved";
   }
   return value === "shipped" ? "shipped" : "paid";
+}
+
+function normalizeChannel(value: unknown, id: string): OrderChannel {
+  if (value === "terminal" || id.startsWith("pi_")) {
+    return "terminal";
+  }
+  return "checkout";
+}
+
+function normalizeStripeObjectType(
+  value: unknown,
+  id: string,
+  channel: OrderChannel
+): StripeObjectType {
+  if (value === "payment_intent" || value === "checkout_session") {
+    return value;
+  }
+  if (channel === "terminal" || id.startsWith("pi_")) {
+    return "payment_intent";
+  }
+  return "checkout_session";
 }
 
 function normalizeShipping(value: LooseOrderRecord["shipping"]): OrderShipping | undefined {
@@ -163,6 +191,12 @@ export function normalizeOrder(input: unknown): OrderRecord | null {
   const status = normalizeStatus(raw.status ?? raw.payment_status);
   const amount_total = asNumber(raw.amount_total) ?? asNumber(raw.amountTotal);
   const currency = asString(raw.currency);
+  const channel = normalizeChannel(raw.channel, id);
+  const stripeObjectType = normalizeStripeObjectType(
+    raw.stripeObjectType ?? raw.stripe_object_type,
+    id,
+    channel
+  );
 
   return {
     id,
@@ -174,6 +208,8 @@ export function normalizeOrder(input: unknown): OrderRecord | null {
     status,
     amount_total,
     currency,
+    channel,
+    stripeObjectType,
     shipping: normalizeShipping(raw.shipping),
     conflictResolution: normalizeConflictResolution(raw.conflictResolution)
   };
