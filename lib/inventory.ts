@@ -180,6 +180,13 @@ export type ConsumeInventoryReservationResult = MultiAtomicDecrementResult & {
   source: "reservation" | "stock";
 };
 
+export type ReservationHoldSummary = {
+  reservedStock: number;
+  activeCheckoutCount: number;
+  nextExpiresAt?: number;
+  lastExpiresAt?: number;
+};
+
 function parseNumberResult(value: unknown, fallback = 0) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -313,14 +320,22 @@ export async function getReservedStock(slug: string): Promise<number> {
   return Math.max(0, Math.floor(reserved));
 }
 
-export async function reconcileReservedStockForSlugs(
+export async function summarizeReservationHoldsForSlugs(
   slugs: string[]
-): Promise<Record<string, number>> {
+): Promise<Record<string, ReservationHoldSummary>> {
   const uniqueSlugs = [...new Set(slugs.map((slug) => slug.trim()).filter(Boolean))];
-  const counts = Object.fromEntries(uniqueSlugs.map((slug) => [slug, 0])) as Record<string, number>;
+  const summaries = Object.fromEntries(
+    uniqueSlugs.map((slug) => [
+      slug,
+      {
+        reservedStock: 0,
+        activeCheckoutCount: 0
+      }
+    ])
+  ) as Record<string, ReservationHoldSummary>;
 
   if (uniqueSlugs.length === 0) {
-    return counts;
+    return summaries;
   }
 
   try {
@@ -364,14 +379,22 @@ export async function reconcileReservedStockForSlugs(
 
         for (const item of reservation.items) {
           if (trackedSlugs.has(item.slug)) {
-            counts[item.slug] = (counts[item.slug] || 0) + item.quantity;
+            const summary = summaries[item.slug];
+            summary.reservedStock += item.quantity;
+            summary.activeCheckoutCount += 1;
+            summary.nextExpiresAt = summary.nextExpiresAt
+              ? Math.min(summary.nextExpiresAt, reservation.expiresAt)
+              : reservation.expiresAt;
+            summary.lastExpiresAt = summary.lastExpiresAt
+              ? Math.max(summary.lastExpiresAt, reservation.expiresAt)
+              : reservation.expiresAt;
           }
         }
       }
     } while (cursor !== "0");
 
-    await Promise.all(uniqueSlugs.map((slug) => kv.set(key.reserved(slug), counts[slug] || 0)));
-    return counts;
+    await Promise.all(uniqueSlugs.map((slug) => kv.set(key.reserved(slug), summaries[slug]?.reservedStock || 0)));
+    return summaries;
   } catch (error) {
     console.error("Reserved stock reconciliation failed", {
       error,
@@ -379,10 +402,25 @@ export async function reconcileReservedStockForSlugs(
     });
 
     const fallback = await Promise.all(
-      uniqueSlugs.map(async (slug) => [slug, await getReservedStock(slug)] as const)
+      uniqueSlugs.map(async (slug) => [
+        slug,
+        {
+          reservedStock: await getReservedStock(slug),
+          activeCheckoutCount: 0
+        }
+      ] as const)
     );
     return Object.fromEntries(fallback);
   }
+}
+
+export async function reconcileReservedStockForSlugs(
+  slugs: string[]
+): Promise<Record<string, number>> {
+  const summaries = await summarizeReservationHoldsForSlugs(slugs);
+  return Object.fromEntries(
+    Object.entries(summaries).map(([slug, summary]) => [slug, summary.reservedStock])
+  );
 }
 
 export async function getAvailableStock(slug: string): Promise<number> {

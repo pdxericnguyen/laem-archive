@@ -1,4 +1,4 @@
-import { reconcileReservedStockForSlugs } from "@/lib/inventory";
+import { summarizeReservationHoldsForSlugs, type ReservationHoldSummary } from "@/lib/inventory";
 import { hasKvEnv, kv } from "@/lib/kv";
 import type { Product } from "@/lib/store";
 import BulkStockEditor from "./stock-bulk";
@@ -28,7 +28,7 @@ type SaveErrorCode = "slug_locked";
 
 type ProductRow = {
   product: Product;
-  reservedStock: number;
+  holdSummary: ReservationHoldSummary;
 };
 
 function formatPriceInput(priceCents: number) {
@@ -95,11 +95,72 @@ function parseSaveErrorCode(value: string | string[] | undefined): SaveErrorCode
   return raw === "slug_locked" ? raw : null;
 }
 
+function parseOptionalPositiveInt(value: string | string[] | undefined) {
+  const raw = typeof value === "string" ? value : Array.isArray(value) ? value[0] : "";
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.floor(parsed);
+}
+
+function formatHoldDeadline(expiresAt: number) {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(new Date(expiresAt * 1000));
+}
+
+function formatMinutesRemaining(expiresAt: number, nowMs: number) {
+  const deltaMs = expiresAt * 1000 - nowMs;
+  if (deltaMs <= 0) {
+    return "now";
+  }
+
+  const minutes = Math.ceil(deltaMs / 60000);
+  if (minutes === 1) {
+    return "about 1 minute";
+  }
+  if (minutes < 60) {
+    return `about ${minutes} minutes`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (remainingMinutes === 0) {
+    return hours === 1 ? "about 1 hour" : `about ${hours} hours`;
+  }
+
+  const hourLabel = hours === 1 ? "1 hour" : `${hours} hours`;
+  const minuteLabel = remainingMinutes === 1 ? "1 minute" : `${remainingMinutes} minutes`;
+  return `about ${hourLabel} ${minuteLabel}`;
+}
+
+function describeHoldWindow(holdSummary: ReservationHoldSummary, nowMs: number) {
+  if (!holdSummary.lastExpiresAt) {
+    return null;
+  }
+
+  const deadline = formatHoldDeadline(holdSummary.lastExpiresAt);
+  const remaining = formatMinutesRemaining(holdSummary.lastExpiresAt, nowMs);
+
+  if (holdSummary.activeCheckoutCount > 1) {
+    return `Last hold expires ${deadline} (${remaining} left if none complete first).`;
+  }
+
+  return `Hold expires ${deadline} (${remaining} left).`;
+}
+
 function buildFilterHref(
   filter: ProductFilterStatus,
   deletedSlug: string | null,
   deleteError: DeleteErrorCode | null,
   deleteSlug: string | null,
+  deleteReservedStock: number | null,
+  deleteActiveCheckoutCount: number | null,
+  deleteLastExpiresAt: number | null,
   saveError: SaveErrorCode | null,
   saveSlug: string | null
 ) {
@@ -113,6 +174,15 @@ function buildFilterHref(
   if (deleteError && deleteSlug) {
     params.set("deleteError", deleteError);
     params.set("deleteSlug", deleteSlug);
+    if (deleteReservedStock) {
+      params.set("deleteReservedStock", String(deleteReservedStock));
+    }
+    if (deleteActiveCheckoutCount) {
+      params.set("deleteActiveCheckoutCount", String(deleteActiveCheckoutCount));
+    }
+    if (deleteLastExpiresAt) {
+      params.set("deleteLastExpiresAt", String(deleteLastExpiresAt));
+    }
   }
   if (saveError && saveSlug) {
     params.set("saveError", saveError);
@@ -122,7 +192,16 @@ function buildFilterHref(
   return query ? `/admin/products?${query}` : "/admin/products";
 }
 
-function getDeleteErrorMessage(deleteError: DeleteErrorCode | null, deleteSlug: string | null) {
+function getDeleteErrorMessage(
+  deleteError: DeleteErrorCode | null,
+  deleteSlug: string | null,
+  details: {
+    reservedStock: number | null;
+    activeCheckoutCount: number | null;
+    lastExpiresAt: number | null;
+  },
+  nowMs: number
+) {
   if (!deleteError || !deleteSlug) {
     return null;
   }
@@ -139,8 +218,23 @@ function getDeleteErrorMessage(deleteError: DeleteErrorCode | null, deleteSlug: 
 
   return (
     <>
-      You can&apos;t delete <code>{deleteSlug}</code> yet because an in-progress checkout is still holding inventory
-      for it. Hidden or archived listings stay protected until that checkout completes or expires.
+      You can&apos;t delete <code>{deleteSlug}</code> yet because{" "}
+      {details.reservedStock ? (
+        <>
+          {details.reservedStock} item{details.reservedStock === 1 ? "" : "s"} {details.reservedStock === 1 ? "is" : "are"}
+        </>
+      ) : (
+        <>inventory is</>
+      )}{" "}
+      still held in checkout. Hidden or archived listings stay protected until that checkout completes or expires.
+      {details.lastExpiresAt ? ` ${describeHoldWindow(
+        {
+          reservedStock: details.reservedStock || 0,
+          activeCheckoutCount: details.activeCheckoutCount || 1,
+          lastExpiresAt: details.lastExpiresAt
+        },
+        nowMs
+      )}` : ""}
     </>
   );
 }
@@ -177,15 +271,31 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
   }
 
   const products = await getProducts();
-  const reservedBySlug = await reconcileReservedStockForSlugs(products.map((product) => product.slug));
+  const holdSummariesBySlug = await summarizeReservationHoldsForSlugs(products.map((product) => product.slug));
   const productRows: ProductRow[] = products.map((product) => ({
     product,
-    reservedStock: reservedBySlug[product.slug] || 0
+    holdSummary: holdSummariesBySlug[product.slug] || {
+      reservedStock: 0,
+      activeCheckoutCount: 0
+    }
   }));
+  const nowMs = Date.now();
   const deletedSlug = typeof searchParams?.deleted === "string" ? searchParams.deleted : null;
   const deleteError = parseDeleteErrorCode(searchParams?.deleteError);
   const deleteSlug = typeof searchParams?.deleteSlug === "string" ? searchParams.deleteSlug : null;
-  const deleteErrorMessage = getDeleteErrorMessage(deleteError, deleteSlug);
+  const deleteReservedStock = parseOptionalPositiveInt(searchParams?.deleteReservedStock);
+  const deleteActiveCheckoutCount = parseOptionalPositiveInt(searchParams?.deleteActiveCheckoutCount);
+  const deleteLastExpiresAt = parseOptionalPositiveInt(searchParams?.deleteLastExpiresAt);
+  const deleteErrorMessage = getDeleteErrorMessage(
+    deleteError,
+    deleteSlug,
+    {
+      reservedStock: deleteReservedStock,
+      activeCheckoutCount: deleteActiveCheckoutCount,
+      lastExpiresAt: deleteLastExpiresAt
+    },
+    nowMs
+  );
   const saveError = parseSaveErrorCode(searchParams?.saveError);
   const saveSlug = typeof searchParams?.saveSlug === "string" ? searchParams.saveSlug : null;
   const saveErrorMessage = getSaveErrorMessage(saveError, saveSlug);
@@ -245,7 +355,17 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
             return (
               <a
                 key={option.value}
-                href={buildFilterHref(option.value, deletedSlug, deleteError, deleteSlug, saveError, saveSlug)}
+                href={buildFilterHref(
+                  option.value,
+                  deletedSlug,
+                  deleteError,
+                  deleteSlug,
+                  deleteReservedStock,
+                  deleteActiveCheckoutCount,
+                  deleteLastExpiresAt,
+                  saveError,
+                  saveSlug
+                )}
                 className={`inline-flex items-center gap-2 border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] no-underline transition-colors ${
                   isActive
                     ? "border-neutral-900 bg-neutral-900 text-white"
@@ -367,13 +487,15 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
             {activeFilter === "all" ? "No products yet." : `No ${activeFilterLabel.toLowerCase()} products yet.`}
           </div>
         ) : (
-          filteredRows.map(({ product, reservedStock }) => {
+          filteredRows.map(({ product, holdSummary }) => {
             const statusBadge = getProductStatusBadge(product);
             const productStatus = getProductStatus(product);
             const slugLocked = productStatus === "live";
             const deleteBlockedByLive = productStatus === "live";
+            const reservedStock = holdSummary.reservedStock;
             const deleteBlockedByReservation = reservedStock > 0;
             const deleteBlocked = deleteBlockedByLive || deleteBlockedByReservation;
+            const holdWindow = describeHoldWindow(holdSummary, nowMs);
             const deleteGuidance = deleteBlockedByLive
               ? (
                   <>
@@ -386,8 +508,10 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                 ? (
                     <>
                       Deletion is temporarily blocked because {reservedStock} item{reservedStock === 1 ? "" : "s"}{" "}
-                      {reservedStock === 1 ? "is" : "are"} still held in an earlier checkout. Hidden or archived
-                      listings can&apos;t be deleted until that checkout completes or expires.
+                      {reservedStock === 1 ? "is" : "are"} still held in{" "}
+                      {holdSummary.activeCheckoutCount > 1 ? `${holdSummary.activeCheckoutCount} checkout sessions` : "checkout"}.
+                      Hidden or archived listings can&apos;t be deleted until that checkout completes or expires.
+                      {holdWindow ? ` ${holdWindow}` : ""}
                     </>
                   )
                 : (

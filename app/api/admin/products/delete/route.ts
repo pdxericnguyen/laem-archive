@@ -1,6 +1,6 @@
 import { del as deleteBlob } from "@vercel/blob";
 
-import { reconcileReservedStockForSlugs } from "@/lib/inventory";
+import { summarizeReservationHoldsForSlugs } from "@/lib/inventory";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import type { Product } from "@/lib/store";
@@ -30,6 +30,9 @@ function buildRedirectUrl(
     deleted?: string;
     deleteError?: "live" | "reserved";
     deleteSlug?: string;
+    deleteReservedStock?: number;
+    deleteActiveCheckoutCount?: number;
+    deleteLastExpiresAt?: number;
   }
 ) {
   const redirectUrl = new URL("/admin/products", request.url);
@@ -45,6 +48,15 @@ function buildRedirectUrl(
   if (params?.deleteSlug) {
     redirectUrl.searchParams.set("deleteSlug", params.deleteSlug);
   }
+  if (params?.deleteReservedStock) {
+    redirectUrl.searchParams.set("deleteReservedStock", String(params.deleteReservedStock));
+  }
+  if (params?.deleteActiveCheckoutCount) {
+    redirectUrl.searchParams.set("deleteActiveCheckoutCount", String(params.deleteActiveCheckoutCount));
+  }
+  if (params?.deleteLastExpiresAt) {
+    redirectUrl.searchParams.set("deleteLastExpiresAt", String(params.deleteLastExpiresAt));
+  }
   return redirectUrl;
 }
 
@@ -53,14 +65,20 @@ function errorResponse(
   payload: DeletePayload,
   status: number,
   deleteError: "live" | "reserved",
-  message: string
+  message: string,
+  details?: {
+    reservedStock?: number;
+    activeCheckoutCount?: number;
+    lastExpiresAt?: number;
+  }
 ) {
   if (wantsJsonResponse(request)) {
     return Response.json(
       {
         ok: false,
         error: message,
-        code: deleteError
+        code: deleteError,
+        details
       },
       { status }
     );
@@ -69,7 +87,10 @@ function errorResponse(
   return Response.redirect(
     buildRedirectUrl(request, payload, {
       deleteError,
-      deleteSlug: payload.slug
+      deleteSlug: payload.slug,
+      deleteReservedStock: details?.reservedStock,
+      deleteActiveCheckoutCount: details?.activeCheckoutCount,
+      deleteLastExpiresAt: details?.lastExpiresAt
     }),
     303
   );
@@ -159,15 +180,21 @@ export async function POST(request: Request) {
     );
   }
 
-  const reservedBySlug = await reconcileReservedStockForSlugs([payload.slug]);
-  const reservedStock = reservedBySlug[payload.slug] || 0;
+  const holdSummaries = await summarizeReservationHoldsForSlugs([payload.slug]);
+  const holdSummary = holdSummaries[payload.slug];
+  const reservedStock = holdSummary?.reservedStock || 0;
   if (reservedStock > 0) {
     return errorResponse(
       request,
       payload,
       409,
       "reserved",
-      "This listing still has inventory reserved by an in-progress checkout and cannot be deleted until that checkout completes or expires."
+      "This listing still has inventory reserved by an in-progress checkout and cannot be deleted until that checkout completes or expires.",
+      {
+        reservedStock,
+        activeCheckoutCount: holdSummary?.activeCheckoutCount,
+        lastExpiresAt: holdSummary?.lastExpiresAt
+      }
     );
   }
 
