@@ -114,13 +114,6 @@ function jsonResponse(payload: unknown, status: number, headers: HeadersInit) {
   });
 }
 
-function formatCheckoutError(error: unknown) {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  return "Unable to start checkout.";
-}
-
 function formatAvailabilityError(slug: string, available: number) {
   if (available <= 0) {
     return `Out of stock: ${slug}`;
@@ -221,7 +214,7 @@ export async function POST(request: Request) {
 
   const baseUrl = normalizeSiteUrl(siteUrl);
   const singleSlug = items.length === 1 ? items[0].slug : null;
-  const successUrl = `${baseUrl}/cart?success=1&session_id={CHECKOUT_SESSION_ID}`;
+  const successUrl = `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = singleSlug
     ? `${baseUrl}/products/${singleSlug}?canceled=1`
     : `${baseUrl}/cart?canceled=1`;
@@ -242,15 +235,14 @@ export async function POST(request: Request) {
       }
     });
   } catch (error) {
-    const errorMessage = formatCheckoutError(error);
     console.error("Stripe checkout session creation failed", {
       error,
       items,
       siteUrl
     });
     return wantsJson
-      ? jsonResponse({ ok: false, error: errorMessage }, 500, rateLimitHeaders)
-      : new Response(errorMessage, { status: 500, headers: rateLimitHeaders });
+      ? jsonResponse({ ok: false, error: "Unable to create checkout session" }, 500, rateLimitHeaders)
+      : new Response("Unable to create checkout session", { status: 500, headers: rateLimitHeaders });
   }
 
   const reservation = await reserveInventoryForCheckoutSession(session.id, items, session.expires_at || expiresAt);

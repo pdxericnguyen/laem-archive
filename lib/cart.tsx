@@ -173,6 +173,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const clear = useCallback(() => {
+    saveToStorage([]);
     setItems([]);
   }, []);
 
