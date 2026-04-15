@@ -1,6 +1,6 @@
 import { del as deleteBlob } from "@vercel/blob";
 
-import { cleanupExpiredInventoryReservations, getReservedStock } from "@/lib/inventory";
+import { reconcileReservedStockForSlugs } from "@/lib/inventory";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import type { Product } from "@/lib/store";
@@ -159,9 +159,8 @@ export async function POST(request: Request) {
     );
   }
 
-  await cleanupExpiredInventoryReservations(100);
-
-  const reservedStock = await getReservedStock(payload.slug);
+  const reservedBySlug = await reconcileReservedStockForSlugs([payload.slug]);
+  const reservedStock = reservedBySlug[payload.slug] || 0;
   if (reservedStock > 0) {
     return errorResponse(
       request,

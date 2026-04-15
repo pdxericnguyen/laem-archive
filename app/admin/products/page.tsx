@@ -1,4 +1,4 @@
-import { cleanupExpiredInventoryReservations, getReservedStock } from "@/lib/inventory";
+import { reconcileReservedStockForSlugs } from "@/lib/inventory";
 import { hasKvEnv, kv } from "@/lib/kv";
 import type { Product } from "@/lib/store";
 import BulkStockEditor from "./stock-bulk";
@@ -176,15 +176,12 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
     );
   }
 
-  await cleanupExpiredInventoryReservations(100);
-
   const products = await getProducts();
-  const productRows: ProductRow[] = await Promise.all(
-    products.map(async (product) => ({
-      product,
-      reservedStock: await getReservedStock(product.slug)
-    }))
-  );
+  const reservedBySlug = await reconcileReservedStockForSlugs(products.map((product) => product.slug));
+  const productRows: ProductRow[] = products.map((product) => ({
+    product,
+    reservedStock: reservedBySlug[product.slug] || 0
+  }));
   const deletedSlug = typeof searchParams?.deleted === "string" ? searchParams.deleted : null;
   const deleteError = parseDeleteErrorCode(searchParams?.deleteError);
   const deleteSlug = typeof searchParams?.deleteSlug === "string" ? searchParams.deleteSlug : null;

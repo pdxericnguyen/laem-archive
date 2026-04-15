@@ -313,6 +313,78 @@ export async function getReservedStock(slug: string): Promise<number> {
   return Math.max(0, Math.floor(reserved));
 }
 
+export async function reconcileReservedStockForSlugs(
+  slugs: string[]
+): Promise<Record<string, number>> {
+  const uniqueSlugs = [...new Set(slugs.map((slug) => slug.trim()).filter(Boolean))];
+  const counts = Object.fromEntries(uniqueSlugs.map((slug) => [slug, 0])) as Record<string, number>;
+
+  if (uniqueSlugs.length === 0) {
+    return counts;
+  }
+
+  try {
+    await cleanupExpiredInventoryReservations(100);
+
+    const trackedSlugs = new Set(uniqueSlugs);
+    const now = Math.floor(Date.now() / 1000);
+    let cursor: string | number = "0";
+
+    do {
+      const [nextCursor, reservationKeys] = await kv.scan(cursor, {
+        match: `${key.reservation("")}*`,
+        count: 100
+      });
+      cursor = nextCursor;
+
+      const sessionIds = reservationKeys
+        .filter(
+          (reservationKey): reservationKey is string =>
+            typeof reservationKey === "string" && reservationKey.startsWith(key.reservation(""))
+        )
+        .map((reservationKey) => reservationKey.slice(key.reservation("").length))
+        .filter(Boolean);
+
+      const reservations = await Promise.all(
+        sessionIds.map(async (sessionId) => ({
+          sessionId,
+          reservation: await readInventoryReservation(sessionId)
+        }))
+      );
+
+      for (const { sessionId, reservation } of reservations) {
+        if (!reservation || reservation.status !== "active") {
+          continue;
+        }
+
+        if (reservation.expiresAt <= now) {
+          await releaseInventoryReservation(sessionId, "expired", now);
+          continue;
+        }
+
+        for (const item of reservation.items) {
+          if (trackedSlugs.has(item.slug)) {
+            counts[item.slug] = (counts[item.slug] || 0) + item.quantity;
+          }
+        }
+      }
+    } while (cursor !== "0");
+
+    await Promise.all(uniqueSlugs.map((slug) => kv.set(key.reserved(slug), counts[slug] || 0)));
+    return counts;
+  } catch (error) {
+    console.error("Reserved stock reconciliation failed", {
+      error,
+      slugs: uniqueSlugs
+    });
+
+    const fallback = await Promise.all(
+      uniqueSlugs.map(async (slug) => [slug, await getReservedStock(slug)] as const)
+    );
+    return Object.fromEntries(fallback);
+  }
+}
+
 export async function getAvailableStock(slug: string): Promise<number> {
   const [stock, reserved] = await Promise.all([getStock(slug), getReservedStock(slug)]);
   return Math.max(0, stock - reserved);
