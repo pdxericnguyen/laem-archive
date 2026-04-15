@@ -114,6 +114,13 @@ function jsonResponse(payload: unknown, status: number, headers: HeadersInit) {
   });
 }
 
+function formatCheckoutError(error: unknown) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return "Unable to start checkout.";
+}
+
 function formatAvailabilityError(slug: string, available: number) {
   if (available <= 0) {
     return `Out of stock: ${slug}`;
@@ -220,17 +227,31 @@ export async function POST(request: Request) {
     : `${baseUrl}/cart?canceled=1`;
   const expiresAt = Math.floor(Date.now() / 1000) + getCheckoutReservationTtlSeconds();
 
-  const session = await stripe.checkout.sessions.create({
-    mode: "payment",
-    success_url: successUrl,
-    cancel_url: cancelUrl,
-    expires_at: expiresAt,
-    line_items: lineItems,
-    metadata: {
-      cart: serializeCartMetadata(items),
-      ...(singleSlug ? { slug: singleSlug } : {})
-    }
-  });
+  let session: Stripe.Checkout.Session;
+
+  try {
+    session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      success_url: successUrl,
+      cancel_url: cancelUrl,
+      expires_at: expiresAt,
+      line_items: lineItems,
+      metadata: {
+        cart: serializeCartMetadata(items),
+        ...(singleSlug ? { slug: singleSlug } : {})
+      }
+    });
+  } catch (error) {
+    const errorMessage = formatCheckoutError(error);
+    console.error("Stripe checkout session creation failed", {
+      error,
+      items,
+      siteUrl
+    });
+    return wantsJson
+      ? jsonResponse({ ok: false, error: errorMessage }, 500, rateLimitHeaders)
+      : new Response(errorMessage, { status: 500, headers: rateLimitHeaders });
+  }
 
   const reservation = await reserveInventoryForCheckoutSession(session.id, items, session.expires_at || expiresAt);
   if (!reservation.ok) {
