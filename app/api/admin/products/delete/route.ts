@@ -1,6 +1,6 @@
 import { del as deleteBlob } from "@vercel/blob";
 
-import { getReservedStock } from "@/lib/inventory";
+import { cleanupExpiredInventoryReservations, getReservedStock } from "@/lib/inventory";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import type { Product } from "@/lib/store";
@@ -159,6 +159,8 @@ export async function POST(request: Request) {
     );
   }
 
+  await cleanupExpiredInventoryReservations(100);
+
   const reservedStock = await getReservedStock(payload.slug);
   if (reservedStock > 0) {
     return errorResponse(
@@ -166,7 +168,7 @@ export async function POST(request: Request) {
       payload,
       409,
       "reserved",
-      "This listing has an active checkout hold and cannot be deleted until the checkout completes or expires."
+      "This listing still has inventory reserved by an in-progress checkout and cannot be deleted until that checkout completes or expires."
     );
   }
 

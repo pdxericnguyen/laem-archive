@@ -1,4 +1,4 @@
-import { getReservedStock } from "@/lib/inventory";
+import { cleanupExpiredInventoryReservations, getReservedStock } from "@/lib/inventory";
 import { hasKvEnv, kv } from "@/lib/kv";
 import type { Product } from "@/lib/store";
 import BulkStockEditor from "./stock-bulk";
@@ -139,8 +139,8 @@ function getDeleteErrorMessage(deleteError: DeleteErrorCode | null, deleteSlug: 
 
   return (
     <>
-      You can&apos;t delete <code>{deleteSlug}</code> right now because an active checkout is holding inventory for it.
-      Wait for that checkout to complete or expire, then try again.
+      You can&apos;t delete <code>{deleteSlug}</code> yet because an in-progress checkout is still holding inventory
+      for it. Hidden or archived listings stay protected until that checkout completes or expires.
     </>
   );
 }
@@ -175,6 +175,8 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
       </main>
     );
   }
+
+  await cleanupExpiredInventoryReservations(100);
 
   const products = await getProducts();
   const productRows: ProductRow[] = await Promise.all(
@@ -387,8 +389,8 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                 ? (
                     <>
                       Deletion is temporarily blocked because {reservedStock} item{reservedStock === 1 ? "" : "s"}{" "}
-                      {reservedStock === 1 ? "is" : "are"} currently held in an active checkout. Wait for that
-                      checkout to complete or expire, then delete it.
+                      {reservedStock === 1 ? "is" : "are"} still held in an earlier checkout. Hidden or archived
+                      listings can&apos;t be deleted until that checkout completes or expires.
                     </>
                   )
                 : (
