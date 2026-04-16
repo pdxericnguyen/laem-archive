@@ -21,6 +21,8 @@ export default function ProductGallery({ title, images }: Props) {
   const hasImages = gallery.length > 0;
   const safeIndex = hasImages ? Math.min(activeIndex, gallery.length - 1) : 0;
   const activeImage = hasImages ? gallery[safeIndex] : "";
+  const isAtStart = safeIndex <= 0;
+  const isAtEnd = safeIndex >= gallery.length - 1;
 
   useEffect(() => {
     if (!thumbnailStripRef.current) {
@@ -38,17 +40,17 @@ export default function ProductGallery({ title, images }: Props) {
   }, [safeIndex]);
 
   function prev() {
-    if (!hasImages) {
+    if (!hasImages || isAtStart) {
       return;
     }
-    setActiveIndex((value) => (value <= 0 ? gallery.length - 1 : value - 1));
+    setActiveIndex((value) => Math.max(0, value - 1));
   }
 
   function next() {
-    if (!hasImages) {
+    if (!hasImages || isAtEnd) {
       return;
     }
-    setActiveIndex((value) => (value >= gallery.length - 1 ? 0 : value + 1));
+    setActiveIndex((value) => Math.min(gallery.length - 1, value + 1));
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -145,11 +147,13 @@ export default function ProductGallery({ title, images }: Props) {
       >
         {activeImage ? (
           <img
+            key={activeImage}
             src={activeImage}
             alt={`${title} image ${safeIndex + 1}`}
             className="h-full w-full object-cover select-none"
             loading="lazy"
             draggable={false}
+            style={{ animation: "gallery-fade 220ms ease-out" }}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-[0.12em] text-neutral-500">
@@ -162,7 +166,8 @@ export default function ProductGallery({ title, images }: Props) {
             <button
               type="button"
               onClick={prev}
-              className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white"
+              disabled={isAtStart}
+              className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Previous image"
             >
               {"<"}
@@ -173,7 +178,8 @@ export default function ProductGallery({ title, images }: Props) {
             <button
               type="button"
               onClick={next}
-              className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white"
+              disabled={isAtEnd}
+              className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Next image"
             >
               {">"}
@@ -205,6 +211,18 @@ export default function ProductGallery({ title, images }: Props) {
           ))}
         </div>
       ) : null}
+
+      <style jsx>{`
+        @keyframes gallery-fade {
+          from {
+            opacity: 0.72;
+          }
+
+          to {
+            opacity: 1;
+          }
+        }
+      `}</style>
     </div>
   );
 }
