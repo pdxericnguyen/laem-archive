@@ -1,9 +1,15 @@
 import { expect, test, type Page } from "@playwright/test";
 
 async function wheelGesture(page: Page, deltaX: number, eventCount = 10, gapMs = 10) {
-  const gallery = page.getByLabel(/gallery test piece gallery/i);
+  const gallery = page.locator("[data-gallery-viewport]");
+  const box = await gallery.boundingBox();
+  if (!box) {
+    throw new Error("Gallery bounds not available");
+  }
+
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   for (let i = 0; i < eventCount; i += 1) {
-    await gallery.dispatchEvent("wheel", { deltaX, deltaY: 0 });
+    await page.mouse.wheel(deltaX, 0);
     await page.waitForTimeout(gapMs);
   }
 }
