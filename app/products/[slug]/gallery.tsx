@@ -19,7 +19,8 @@ export default function ProductGallery({ title, images }: Props) {
   const [transitionDirection, setTransitionDirection] = useState<GalleryDirection>("next");
   const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const wheelGateRef = useRef(0);
+  const wheelLockRef = useRef(false);
+  const wheelUnlockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const hasImages = gallery.length > 0;
   const safeIndex = hasImages ? Math.min(activeIndex, gallery.length - 1) : 0;
@@ -39,6 +40,29 @@ export default function ProductGallery({ title, images }: Props) {
       inline: "center"
     });
   }, [safeIndex]);
+
+  useEffect(() => {
+    return () => {
+      if (wheelUnlockTimerRef.current) {
+        clearTimeout(wheelUnlockTimerRef.current);
+      }
+    };
+  }, []);
+
+  function isFromGalleryControl(event: PointerEvent<HTMLDivElement>) {
+    return event.target instanceof Element && Boolean(event.target.closest("[data-gallery-control]"));
+  }
+
+  function holdWheelUntilGestureEnds() {
+    if (wheelUnlockTimerRef.current) {
+      clearTimeout(wheelUnlockTimerRef.current);
+    }
+
+    wheelUnlockTimerRef.current = setTimeout(() => {
+      wheelLockRef.current = false;
+      wheelUnlockTimerRef.current = null;
+    }, 420);
+  }
 
   function move(direction: GalleryDirection) {
     if (gallery.length <= 1) {
@@ -69,7 +93,7 @@ export default function ProductGallery({ title, images }: Props) {
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
-    if (gallery.length <= 1) {
+    if (gallery.length <= 1 || isFromGalleryControl(event)) {
       return;
     }
 
@@ -122,13 +146,13 @@ export default function ProductGallery({ title, images }: Props) {
       return;
     }
 
-    const now = Date.now();
-    if (now - wheelGateRef.current < 250) {
+    event.preventDefault();
+    holdWheelUntilGestureEnds();
+    if (wheelLockRef.current) {
       return;
     }
 
-    wheelGateRef.current = now;
-    event.preventDefault();
+    wheelLockRef.current = true;
     if (primaryDelta > 0) {
       next();
       return;
@@ -186,6 +210,7 @@ export default function ProductGallery({ title, images }: Props) {
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between p-2">
             <button
               type="button"
+              data-gallery-control
               onClick={() => prev()}
               className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white"
               aria-label="Previous image"
@@ -197,6 +222,7 @@ export default function ProductGallery({ title, images }: Props) {
             </div>
             <button
               type="button"
+              data-gallery-control
               onClick={() => next()}
               className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white"
               aria-label="Next image"
