@@ -334,7 +334,7 @@ export default function ProductGallery({ title, images }: Props) {
             data-gallery-viewport
             className="gallery-scroll h-full overflow-x-auto overflow-y-hidden"
             onScroll={handleScroll}
-            onWheelCapture={handleWheel}
+            onWheel={handleWheel}
           >
             <div className="flex h-full">
               {gallery.map((imageUrl, index) => (
@@ -414,8 +414,6 @@ export default function ProductGallery({ title, images }: Props) {
 
       <style jsx>{`
         .gallery-scroll {
-          overscroll-behavior-x: contain;
-          overscroll-behavior-y: auto;
           scrollbar-width: none;
           scroll-snap-type: x mandatory;
           touch-action: pan-y pinch-zoom;
