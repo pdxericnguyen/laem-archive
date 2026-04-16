@@ -21,8 +21,6 @@ export default function ProductGallery({ title, images }: Props) {
   const hasImages = gallery.length > 0;
   const safeIndex = hasImages ? Math.min(activeIndex, gallery.length - 1) : 0;
   const activeImage = hasImages ? gallery[safeIndex] : "";
-  const isAtStart = safeIndex <= 0;
-  const isAtEnd = safeIndex >= gallery.length - 1;
 
   useEffect(() => {
     if (!thumbnailStripRef.current) {
@@ -39,36 +37,30 @@ export default function ProductGallery({ title, images }: Props) {
     });
   }, [safeIndex]);
 
-  function move(step: -1 | 1, options?: { wrap?: boolean }) {
-    if (!hasImages) {
-      return;
-    }
-
-    const shouldWrap = options?.wrap && gallery.length > 1;
-    if (!shouldWrap && ((step < 0 && isAtStart) || (step > 0 && isAtEnd))) {
+  function move(step: -1 | 1) {
+    if (gallery.length <= 1) {
       return;
     }
 
     setActiveIndex((value) => {
-      const nextIndex = value + step;
-      if (shouldWrap) {
-        if (nextIndex < 0) {
-          return gallery.length - 1;
-        }
-        if (nextIndex >= gallery.length) {
-          return 0;
-        }
+      const currentIndex = Math.min(gallery.length - 1, Math.max(0, value));
+      const nextIndex = currentIndex + step;
+      if (nextIndex < 0) {
+        return gallery.length - 1;
       }
-      return Math.min(gallery.length - 1, Math.max(0, nextIndex));
+      if (nextIndex >= gallery.length) {
+        return 0;
+      }
+      return nextIndex;
     });
   }
 
-  function prev(options?: { wrap?: boolean }) {
-    move(-1, options);
+  function prev() {
+    move(-1);
   }
 
-  function next(options?: { wrap?: boolean }) {
-    move(1, options);
+  function next() {
+    move(1);
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -100,13 +92,12 @@ export default function ProductGallery({ title, images }: Props) {
       return;
     }
 
-    const shouldWrap = event.pointerType === "touch";
     if (deltaX < 0) {
-      next({ wrap: shouldWrap });
+      next();
       return;
     }
 
-    prev({ wrap: shouldWrap });
+    prev();
   }
 
   function handlePointerCancel(event: PointerEvent<HTMLDivElement>) {
@@ -192,8 +183,7 @@ export default function ProductGallery({ title, images }: Props) {
             <button
               type="button"
               onClick={() => prev()}
-              disabled={isAtStart}
-              className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white"
               aria-label="Previous image"
             >
               {"<"}
@@ -204,8 +194,7 @@ export default function ProductGallery({ title, images }: Props) {
             <button
               type="button"
               onClick={() => next()}
-              disabled={isAtEnd}
-              className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
+              className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white"
               aria-label="Next image"
             >
               {">"}
