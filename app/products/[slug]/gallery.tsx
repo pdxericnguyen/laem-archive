@@ -10,6 +10,7 @@ type Props = {
 type GalleryDirection = "previous" | "next";
 
 const WRAP_CUE_MS = 240;
+const WHEEL_GESTURE_LULL_MS = 320;
 const WHEEL_WRAP_BLOCK_MS = 360;
 const PROGRAMMATIC_SCROLL_MS = 420;
 
@@ -26,6 +27,7 @@ export default function ProductGallery({ title, images }: Props) {
   const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
   const activeIndexRef = useRef(0);
   const wrapCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wheelGestureRef = useRef<{ direction: GalleryDirection; lastAt: number; startIndex: number } | null>(null);
   const wheelWrapBlockRef = useRef<{ direction: GalleryDirection; until: number } | null>(null);
   const programmaticScrollTargetRef = useRef<number | null>(null);
   const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -198,6 +200,23 @@ export default function ProductGallery({ title, images }: Props) {
     }
 
     const now = window.performance.now();
+    const wheelDirection: GalleryDirection = horizontalDelta > 0 ? "next" : "previous";
+    const currentGesture = wheelGestureRef.current;
+    const isNewGesture =
+      !currentGesture ||
+      currentGesture.direction !== wheelDirection ||
+      now - currentGesture.lastAt > WHEEL_GESTURE_LULL_MS;
+
+    if (isNewGesture) {
+      wheelGestureRef.current = {
+        direction: wheelDirection,
+        lastAt: now,
+        startIndex: activeIndexRef.current
+      };
+    } else {
+      currentGesture.lastAt = now;
+    }
+
     const blockedWrap = wheelWrapBlockRef.current;
     if (blockedWrap) {
       if (now >= blockedWrap.until) {
@@ -214,14 +233,16 @@ export default function ProductGallery({ title, images }: Props) {
     }
 
     const current = activeIndexRef.current;
-    if (current === gallery.length - 1 && horizontalDelta > 0) {
+    const gestureStartIndex = wheelGestureRef.current?.startIndex ?? current;
+
+    if (current === gallery.length - 1 && wheelDirection === "next" && gestureStartIndex === gallery.length - 1) {
       event.preventDefault();
       wheelWrapBlockRef.current = { direction: "next", until: now + WHEEL_WRAP_BLOCK_MS };
       setSelectedIndex(0, "next", true);
       return;
     }
 
-    if (current === 0 && horizontalDelta < 0) {
+    if (current === 0 && wheelDirection === "previous" && gestureStartIndex === 0) {
       event.preventDefault();
       wheelWrapBlockRef.current = { direction: "previous", until: now + WHEEL_WRAP_BLOCK_MS };
       setSelectedIndex(gallery.length - 1, "previous", true);
