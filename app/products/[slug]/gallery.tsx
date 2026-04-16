@@ -10,8 +10,8 @@ type Props = {
 type GalleryDirection = "previous" | "next";
 
 const WRAP_CUE_MS = 240;
-const WHEEL_GESTURE_IDLE_MS = 130;
-const WHEEL_GESTURE_THRESHOLD_PX = 26;
+const WHEEL_GESTURE_IDLE_MS = 85;
+const WHEEL_GESTURE_THRESHOLD_PX = 18;
 const WHEEL_LINE_DELTA_PX = 18;
 const WHEEL_PAGE_DELTA_PX = 120;
 
@@ -180,10 +180,13 @@ export default function ProductGallery({ title, images }: Props) {
     }
 
     const rawDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.shiftKey ? event.deltaY : 0;
+    if (!Number.isFinite(rawDelta) || rawDelta === 0) {
+      return;
+    }
     const deltaScale =
       event.deltaMode === 1 ? WHEEL_LINE_DELTA_PX : event.deltaMode === 2 ? WHEEL_PAGE_DELTA_PX : 1;
     const primaryDelta = rawDelta * deltaScale;
-    if (Math.abs(primaryDelta) < 2) {
+    if (!Number.isFinite(primaryDelta) || primaryDelta === 0) {
       return;
     }
 
