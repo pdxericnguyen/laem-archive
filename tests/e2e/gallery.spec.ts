@@ -1,11 +1,20 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function wheelBurst(page: Page, deltaX: number, count: number, gapMs = 12) {
+async function dragHorizontally(page: Page, deltaX: number) {
   const gallery = page.getByLabel(/gallery test piece gallery/i);
-  for (let i = 0; i < count; i += 1) {
-    await gallery.dispatchEvent("wheel", { deltaX, deltaY: 0 });
-    await page.waitForTimeout(gapMs);
+  const box = await gallery.boundingBox();
+  if (!box) {
+    throw new Error("Gallery bounds not available");
   }
+
+  const startX = box.x + box.width / 2;
+  const startY = box.y + box.height / 2;
+  const endX = startX + deltaX;
+
+  await page.mouse.move(startX, startY);
+  await page.mouse.down();
+  await page.mouse.move(endX, startY, { steps: 10 });
+  await page.mouse.up();
 }
 
 test.beforeEach(async ({ page }) => {
@@ -27,18 +36,14 @@ test("desktop arrows move and wrap in both directions", async ({ page }) => {
   await expect(page.getByAltText("Gallery test piece image 1")).toBeVisible();
 });
 
-test("single horizontal wheel gesture advances one image and keeps url stable", async ({ page }) => {
+test("desktop drag gesture advances one image at a time and keeps url stable", async ({ page }) => {
   const startUrl = page.url();
 
-  await wheelBurst(page, 6, 6, 10);
+  await dragHorizontally(page, -110);
   await expect(page.getByAltText("Gallery test piece image 2")).toBeVisible();
   await expect(page).toHaveURL(startUrl);
 
-  await wheelBurst(page, 6, 6, 10);
-  await expect(page.getByAltText("Gallery test piece image 2")).toBeVisible();
-
-  await page.waitForTimeout(180);
-  await wheelBurst(page, 6, 6, 10);
+  await dragHorizontally(page, -110);
   await expect(page.getByAltText("Gallery test piece image 3")).toBeVisible();
   await expect(page).toHaveURL(startUrl);
 });
