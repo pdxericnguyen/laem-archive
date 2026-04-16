@@ -8,6 +8,10 @@ async function wheelGesture(page: Page, deltaX: number, eventCount = 10, gapMs =
   }
 }
 
+async function wheelLull(page: Page) {
+  await wheelGesture(page, 1, 3, 4);
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/dev/gallery-sandbox");
   await expect(page.getByAltText("Gallery test piece image 1")).toBeVisible();
@@ -37,11 +41,11 @@ test("desktop wheel gestures advance one image per gesture and wrap", async ({ p
   await wheelGesture(page, 7, 12, 8);
   await expect(page.getByAltText("Gallery test piece image 2")).toBeVisible();
 
-  await page.waitForTimeout(170);
+  await wheelLull(page);
   await wheelGesture(page, 7, 12, 8);
   await expect(page.getByAltText("Gallery test piece image 3")).toBeVisible();
 
-  await page.waitForTimeout(170);
+  await wheelLull(page);
   await wheelGesture(page, 7, 12, 8);
   await expect(page.getByAltText("Gallery test piece image 1")).toBeVisible();
 

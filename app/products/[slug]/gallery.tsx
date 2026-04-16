@@ -10,8 +10,9 @@ type Props = {
 type GalleryDirection = "previous" | "next";
 
 const WRAP_CUE_MS = 240;
-const WHEEL_GESTURE_IDLE_MS = 85;
+const WHEEL_GESTURE_IDLE_MS = 160;
 const WHEEL_GESTURE_THRESHOLD_PX = 18;
+const WHEEL_GESTURE_LULL_PX = 4;
 const WHEEL_LINE_DELTA_PX = 18;
 const WHEEL_PAGE_DELTA_PX = 120;
 
@@ -26,10 +27,11 @@ export default function ProductGallery({ title, images }: Props) {
   const [wrapCueDirection, setWrapCueDirection] = useState<GalleryDirection | null>(null);
   const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const wheelGestureRef = useRef<{ direction: GalleryDirection | null; delta: number; moved: boolean }>({
+  const wheelGestureRef = useRef<{ direction: GalleryDirection | null; delta: number; moved: boolean; sawLull: boolean }>({
     direction: null,
     delta: 0,
-    moved: false
+    moved: false,
+    sawLull: false
   });
   const wheelResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -89,7 +91,8 @@ export default function ProductGallery({ title, images }: Props) {
       wheelGestureRef.current = {
         direction: null,
         delta: 0,
-        moved: false
+        moved: false,
+        sawLull: false
       };
       wheelResetTimerRef.current = null;
     }, WHEEL_GESTURE_IDLE_MS);
@@ -198,9 +201,24 @@ export default function ProductGallery({ title, images }: Props) {
     if (gesture.direction && gesture.direction !== direction) {
       gesture.delta = 0;
       gesture.moved = false;
+      gesture.sawLull = false;
     }
 
     gesture.direction = direction;
+    if (gesture.moved) {
+      if (Math.abs(primaryDelta) <= WHEEL_GESTURE_LULL_PX) {
+        gesture.sawLull = true;
+        gesture.delta = 0;
+        return;
+      }
+
+      if (!gesture.sawLull) {
+        return;
+      }
+
+      gesture.moved = false;
+    }
+
     gesture.delta += primaryDelta;
 
     if (gesture.moved || Math.abs(gesture.delta) < WHEEL_GESTURE_THRESHOLD_PX) {
@@ -208,6 +226,7 @@ export default function ProductGallery({ title, images }: Props) {
     }
 
     gesture.moved = true;
+    gesture.sawLull = false;
     gesture.delta = 0;
     if (direction === "next") {
       next();
