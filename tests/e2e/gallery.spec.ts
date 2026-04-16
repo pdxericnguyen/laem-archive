@@ -86,3 +86,18 @@ test("desktop wheel edge behavior works with longer galleries", async ({ page })
   await wheelGesture(page, "next");
   await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 5");
 });
+
+test("desktop fast wheel input can move through longer galleries without forced pauses", async ({ page }) => {
+  await page.goto("/dev/gallery-sandbox?images=5");
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 5");
+
+  await wheelGesture(page, "next", 6);
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("5 / 5");
+
+  await page.waitForTimeout(380);
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("5 / 5");
+
+  await pauseBetweenWheelGestures(page);
+  await wheelGesture(page, "next");
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 5");
+});

@@ -374,7 +374,12 @@ export default function ProductGallery({ title, images }: Props) {
 
         .gallery-slide {
           scroll-snap-align: start;
-          scroll-snap-stop: always;
+        }
+
+        @media (pointer: coarse) {
+          .gallery-slide {
+            scroll-snap-stop: always;
+          }
         }
 
         .gallery-wrap-cue-next::after,
