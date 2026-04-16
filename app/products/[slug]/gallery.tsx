@@ -1,6 +1,6 @@
 "use client";
 
-import { KeyboardEvent, PointerEvent, useEffect, useMemo, useRef, useState } from "react";
+import { KeyboardEvent, PointerEvent, WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   title: string;
@@ -10,6 +10,10 @@ type Props = {
 type GalleryDirection = "previous" | "next";
 
 const WRAP_CUE_MS = 240;
+const WHEEL_GESTURE_IDLE_MS = 130;
+const WHEEL_GESTURE_THRESHOLD_PX = 26;
+const WHEEL_LINE_DELTA_PX = 18;
+const WHEEL_PAGE_DELTA_PX = 120;
 
 function normalizeImages(images: string[]) {
   return images.map((item) => item.trim()).filter(Boolean);
@@ -22,6 +26,12 @@ export default function ProductGallery({ title, images }: Props) {
   const [wrapCueDirection, setWrapCueDirection] = useState<GalleryDirection | null>(null);
   const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const wheelGestureRef = useRef<{ direction: GalleryDirection | null; delta: number; moved: boolean }>({
+    direction: null,
+    delta: 0,
+    moved: false
+  });
+  const wheelResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const hasImages = gallery.length > 0;
@@ -45,6 +55,9 @@ export default function ProductGallery({ title, images }: Props) {
 
   useEffect(() => {
     return () => {
+      if (wheelResetTimerRef.current) {
+        clearTimeout(wheelResetTimerRef.current);
+      }
       if (wrapCueTimerRef.current) {
         clearTimeout(wrapCueTimerRef.current);
       }
@@ -65,6 +78,21 @@ export default function ProductGallery({ title, images }: Props) {
       setWrapCueDirection(null);
       wrapCueTimerRef.current = null;
     }, WRAP_CUE_MS);
+  }
+
+  function resetWheelGestureSoon() {
+    if (wheelResetTimerRef.current) {
+      clearTimeout(wheelResetTimerRef.current);
+    }
+
+    wheelResetTimerRef.current = setTimeout(() => {
+      wheelGestureRef.current = {
+        direction: null,
+        delta: 0,
+        moved: false
+      };
+      wheelResetTimerRef.current = null;
+    }, WHEEL_GESTURE_IDLE_MS);
   }
 
   function move(direction: GalleryDirection) {
@@ -146,6 +174,45 @@ export default function ProductGallery({ title, images }: Props) {
     pointerStartRef.current = null;
   }
 
+  function handleWheel(event: WheelEvent<HTMLDivElement>) {
+    if (gallery.length <= 1) {
+      return;
+    }
+
+    const rawDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.shiftKey ? event.deltaY : 0;
+    const deltaScale =
+      event.deltaMode === 1 ? WHEEL_LINE_DELTA_PX : event.deltaMode === 2 ? WHEEL_PAGE_DELTA_PX : 1;
+    const primaryDelta = rawDelta * deltaScale;
+    if (Math.abs(primaryDelta) < 2) {
+      return;
+    }
+
+    event.preventDefault();
+    resetWheelGestureSoon();
+
+    const direction: GalleryDirection = primaryDelta > 0 ? "next" : "previous";
+    const gesture = wheelGestureRef.current;
+    if (gesture.direction && gesture.direction !== direction) {
+      gesture.delta = 0;
+      gesture.moved = false;
+    }
+
+    gesture.direction = direction;
+    gesture.delta += primaryDelta;
+
+    if (gesture.moved || Math.abs(gesture.delta) < WHEEL_GESTURE_THRESHOLD_PX) {
+      return;
+    }
+
+    gesture.moved = true;
+    gesture.delta = 0;
+    if (direction === "next") {
+      next();
+      return;
+    }
+    prev();
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (gallery.length <= 1) {
       return;
@@ -174,6 +241,7 @@ export default function ProductGallery({ title, images }: Props) {
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
+        onWheel={handleWheel}
         style={{ overscrollBehaviorX: "contain", touchAction: "pan-y" }}
         aria-label={gallery.length > 1 ? `${title} gallery. Use arrow keys or swipe to change images.` : `${title} gallery`}
       >
