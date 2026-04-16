@@ -8,10 +8,21 @@ type Props = {
 };
 
 type GalleryDirection = "previous" | "next";
+type WheelGestureState = {
+  accumulatedDelta: number;
+  direction: GalleryDirection;
+  lastAt: number;
+  startIndex: number;
+  stopUntilNextGesture: boolean;
+};
 
 const WRAP_CUE_MS = 240;
-const WHEEL_GESTURE_LULL_MS = 320;
-const WHEEL_WRAP_BLOCK_MS = 360;
+const WHEEL_GESTURE_LULL_MS = 140;
+const WHEEL_HORIZONTAL_INTENT_RATIO = 0.8;
+const WHEEL_MIN_STEP_DELTA = 42;
+const WHEEL_MAX_STEP_DELTA = 96;
+const WHEEL_STEP_WIDTH_RATIO = 0.14;
+const WHEEL_MAX_STEPS_PER_EVENT = 4;
 const PROGRAMMATIC_SCROLL_MS = 420;
 
 function normalizeImages(images: string[]) {
@@ -27,8 +38,7 @@ export default function ProductGallery({ title, images }: Props) {
   const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
   const activeIndexRef = useRef(0);
   const wrapCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wheelGestureRef = useRef<{ direction: GalleryDirection; lastAt: number; startIndex: number } | null>(null);
-  const wheelWrapBlockRef = useRef<{ direction: GalleryDirection; until: number } | null>(null);
+  const wheelGestureRef = useRef<WheelGestureState | null>(null);
   const programmaticScrollTargetRef = useRef<number | null>(null);
   const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -160,6 +170,47 @@ export default function ProductGallery({ title, images }: Props) {
     setSelectedIndex(index, index > activeIndex ? "next" : "previous");
   }
 
+  function normalizeWheelDelta(delta: number, deltaMode: number, viewportSize: number) {
+    if (deltaMode === 1) {
+      return delta * 40;
+    }
+
+    if (deltaMode === 2) {
+      return delta * viewportSize;
+    }
+
+    return delta;
+  }
+
+  function getWheelStepDelta(viewportWidth: number) {
+    return Math.min(Math.max(viewportWidth * WHEEL_STEP_WIDTH_RATIO, WHEEL_MIN_STEP_DELTA), WHEEL_MAX_STEP_DELTA);
+  }
+
+  function applyWheelStep(direction: GalleryDirection, gestureStartIndex: number) {
+    const current = activeIndexRef.current;
+
+    if (current === gallery.length - 1 && direction === "next") {
+      if (gestureStartIndex === gallery.length - 1) {
+        setSelectedIndex(0, "next", true);
+        return "wrapped";
+      }
+
+      return "edge";
+    }
+
+    if (current === 0 && direction === "previous") {
+      if (gestureStartIndex === 0) {
+        setSelectedIndex(gallery.length - 1, "previous", true);
+        return "wrapped";
+      }
+
+      return "edge";
+    }
+
+    setSelectedIndex(direction === "next" ? current + 1 : current - 1, direction);
+    return "moved";
+  }
+
   function handleScroll(event: UIEvent<HTMLDivElement>) {
     const viewport = event.currentTarget;
     if (gallery.length <= 1 || viewport.clientWidth <= 0) {
@@ -194,10 +245,17 @@ export default function ProductGallery({ title, images }: Props) {
       return;
     }
 
-    const horizontalDelta = event.deltaX;
-    if (horizontalDelta === 0) {
+    const viewport = event.currentTarget;
+    const horizontalDelta = normalizeWheelDelta(event.deltaX, event.deltaMode, viewport.clientWidth);
+    const verticalDelta = normalizeWheelDelta(event.deltaY, event.deltaMode, viewport.clientHeight);
+    if (
+      Math.abs(horizontalDelta) < 1 ||
+      Math.abs(horizontalDelta) < Math.abs(verticalDelta) * WHEEL_HORIZONTAL_INTENT_RATIO
+    ) {
       return;
     }
+
+    event.preventDefault();
 
     const now = window.performance.now();
     const wheelDirection: GalleryDirection = horizontalDelta > 0 ? "next" : "previous";
@@ -209,43 +267,36 @@ export default function ProductGallery({ title, images }: Props) {
 
     if (isNewGesture) {
       wheelGestureRef.current = {
+        accumulatedDelta: 0,
         direction: wheelDirection,
         lastAt: now,
-        startIndex: activeIndexRef.current
+        startIndex: activeIndexRef.current,
+        stopUntilNextGesture: false
       };
     } else {
       currentGesture.lastAt = now;
     }
 
-    const blockedWrap = wheelWrapBlockRef.current;
-    if (blockedWrap) {
-      if (now >= blockedWrap.until) {
-        wheelWrapBlockRef.current = null;
-      } else {
-        const isSameDirection =
-          blockedWrap.direction === "next" ? horizontalDelta > 0 : horizontalDelta < 0;
-        if (isSameDirection) {
-          event.preventDefault();
-          return;
-        }
-        wheelWrapBlockRef.current = null;
-      }
-    }
-
-    const current = activeIndexRef.current;
-    const gestureStartIndex = wheelGestureRef.current?.startIndex ?? current;
-
-    if (current === gallery.length - 1 && wheelDirection === "next" && gestureStartIndex === gallery.length - 1) {
-      event.preventDefault();
-      wheelWrapBlockRef.current = { direction: "next", until: now + WHEEL_WRAP_BLOCK_MS };
-      setSelectedIndex(0, "next", true);
+    const gesture = wheelGestureRef.current;
+    if (!gesture || gesture.stopUntilNextGesture) {
       return;
     }
 
-    if (current === 0 && wheelDirection === "previous" && gestureStartIndex === 0) {
-      event.preventDefault();
-      wheelWrapBlockRef.current = { direction: "previous", until: now + WHEEL_WRAP_BLOCK_MS };
-      setSelectedIndex(gallery.length - 1, "previous", true);
+    gesture.accumulatedDelta += horizontalDelta;
+    const stepDelta = getWheelStepDelta(viewport.clientWidth);
+    let stepsTaken = 0;
+
+    while (Math.abs(gesture.accumulatedDelta) >= stepDelta && stepsTaken < WHEEL_MAX_STEPS_PER_EVENT) {
+      const result = applyWheelStep(wheelDirection, gesture.startIndex);
+      stepsTaken += 1;
+
+      if (result !== "moved") {
+        gesture.accumulatedDelta = 0;
+        gesture.stopUntilNextGesture = true;
+        return;
+      }
+
+      gesture.accumulatedDelta -= Math.sign(gesture.accumulatedDelta) * stepDelta;
     }
   }
 

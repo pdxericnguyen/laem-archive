@@ -7,7 +7,10 @@ async function wheelGesture(page: Page, direction: "previous" | "next", eventCou
     throw new Error("Gallery bounds not available");
   }
 
-  const scrollAmount = await gallery.evaluate((element) => element.clientWidth * 0.72);
+  const scrollAmount = await gallery.evaluate((element) => {
+    const stepDelta = Math.min(Math.max(element.clientWidth * 0.14, 42), 96);
+    return stepDelta + 6;
+  });
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   for (let i = 0; i < eventCount; i += 1) {
     await page.mouse.wheel(direction === "next" ? scrollAmount : -scrollAmount, 0);
@@ -16,7 +19,7 @@ async function wheelGesture(page: Page, direction: "previous" | "next", eventCou
 }
 
 async function pauseBetweenWheelGestures(page: Page) {
-  await page.waitForTimeout(380);
+  await page.waitForTimeout(180);
 }
 
 test.beforeEach(async ({ page }) => {
@@ -46,9 +49,9 @@ test("desktop horizontal wheel gestures snap one image per gesture and wrap at t
   await expect(page).toHaveURL(startUrl);
 
   await pauseBetweenWheelGestures(page);
-  await wheelGesture(page, "next", 3);
+  await wheelGesture(page, "next");
   await expect(page.locator("[data-gallery-counter]")).toHaveText("3 / 3");
-  await page.waitForTimeout(380);
+  await wheelGesture(page, "next", 3);
   await expect(page.locator("[data-gallery-counter]")).toHaveText("3 / 3");
 
   await pauseBetweenWheelGestures(page);
@@ -79,7 +82,7 @@ test("desktop wheel edge behavior works with longer galleries", async ({ page })
   await pauseBetweenWheelGestures(page);
   await wheelGesture(page, "next", 3);
   await expect(page.locator("[data-gallery-counter]")).toHaveText("5 / 5");
-  await page.waitForTimeout(380);
+  await wheelGesture(page, "next", 3);
   await expect(page.locator("[data-gallery-counter]")).toHaveText("5 / 5");
 
   await pauseBetweenWheelGestures(page);
@@ -91,10 +94,10 @@ test("desktop fast wheel input can move through longer galleries without forced 
   await page.goto("/dev/gallery-sandbox?images=5");
   await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 5");
 
-  await wheelGesture(page, "next", 6);
+  await wheelGesture(page, "next", 4);
   await expect(page.locator("[data-gallery-counter]")).toHaveText("5 / 5");
 
-  await page.waitForTimeout(380);
+  await wheelGesture(page, "next", 3);
   await expect(page.locator("[data-gallery-counter]")).toHaveText("5 / 5");
 
   await pauseBetweenWheelGestures(page);
