@@ -5,6 +5,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "test:e2e": "playwright test",
     "seed:kv": "node scripts/seed-kv.mjs",
     "env:audit": "node scripts/env-audit.mjs"
   },
@@ -18,6 +19,7 @@
     "stripe": "^14.25.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.54.2",
     "@types/react": "19.2.13",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.41",
