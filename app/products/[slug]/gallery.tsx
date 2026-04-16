@@ -39,18 +39,36 @@ export default function ProductGallery({ title, images }: Props) {
     });
   }, [safeIndex]);
 
-  function prev() {
-    if (!hasImages || isAtStart) {
+  function move(step: -1 | 1, options?: { wrap?: boolean }) {
+    if (!hasImages) {
       return;
     }
-    setActiveIndex((value) => Math.max(0, value - 1));
+
+    const shouldWrap = options?.wrap && gallery.length > 1;
+    if (!shouldWrap && ((step < 0 && isAtStart) || (step > 0 && isAtEnd))) {
+      return;
+    }
+
+    setActiveIndex((value) => {
+      const nextIndex = value + step;
+      if (shouldWrap) {
+        if (nextIndex < 0) {
+          return gallery.length - 1;
+        }
+        if (nextIndex >= gallery.length) {
+          return 0;
+        }
+      }
+      return Math.min(gallery.length - 1, Math.max(0, nextIndex));
+    });
   }
 
-  function next() {
-    if (!hasImages || isAtEnd) {
-      return;
-    }
-    setActiveIndex((value) => Math.min(gallery.length - 1, value + 1));
+  function prev(options?: { wrap?: boolean }) {
+    move(-1, options);
+  }
+
+  function next(options?: { wrap?: boolean }) {
+    move(1, options);
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -58,6 +76,7 @@ export default function ProductGallery({ title, images }: Props) {
       return;
     }
 
+    event.currentTarget.setPointerCapture?.(event.pointerId);
     pointerStartRef.current = {
       x: event.clientX,
       y: event.clientY
@@ -67,6 +86,9 @@ export default function ProductGallery({ title, images }: Props) {
   function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
     const start = pointerStartRef.current;
     pointerStartRef.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
 
     if (!start || gallery.length <= 1) {
       return;
@@ -78,15 +100,19 @@ export default function ProductGallery({ title, images }: Props) {
       return;
     }
 
+    const shouldWrap = event.pointerType === "touch";
     if (deltaX < 0) {
-      next();
+      next({ wrap: shouldWrap });
       return;
     }
 
-    prev();
+    prev({ wrap: shouldWrap });
   }
 
-  function handlePointerCancel() {
+  function handlePointerCancel(event: PointerEvent<HTMLDivElement>) {
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     pointerStartRef.current = null;
   }
 
@@ -165,7 +191,7 @@ export default function ProductGallery({ title, images }: Props) {
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center justify-between p-2">
             <button
               type="button"
-              onClick={prev}
+              onClick={() => prev()}
               disabled={isAtStart}
               className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Previous image"
@@ -177,7 +203,7 @@ export default function ProductGallery({ title, images }: Props) {
             </div>
             <button
               type="button"
-              onClick={next}
+              onClick={() => next()}
               disabled={isAtEnd}
               className="pointer-events-auto h-9 w-9 border border-neutral-300 bg-white/90 text-sm font-semibold hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Next image"
