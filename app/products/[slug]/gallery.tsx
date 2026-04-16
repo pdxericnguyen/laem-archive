@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { KeyboardEvent, PointerEvent, UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   title: string;
@@ -14,10 +14,28 @@ function normalizeImages(images: string[]) {
 export default function ProductGallery({ title, images }: Props) {
   const gallery = useMemo(() => normalizeImages(images), [images]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const wheelGateRef = useRef(0);
 
   const hasImages = gallery.length > 0;
   const safeIndex = hasImages ? Math.min(activeIndex, gallery.length - 1) : 0;
   const activeImage = hasImages ? gallery[safeIndex] : "";
+
+  useEffect(() => {
+    if (!thumbnailStripRef.current) {
+      return;
+    }
+
+    const activeThumbnail = thumbnailStripRef.current.querySelector<HTMLButtonElement>(
+      `[data-gallery-thumb="${safeIndex}"]`
+    );
+    activeThumbnail?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+      inline: "center"
+    });
+  }, [safeIndex]);
 
   function prev() {
     if (!hasImages) {
@@ -33,15 +51,105 @@ export default function ProductGallery({ title, images }: Props) {
     setActiveIndex((value) => (value >= gallery.length - 1 ? 0 : value + 1));
   }
 
+  function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (gallery.length <= 1) {
+      return;
+    }
+
+    pointerStartRef.current = {
+      x: event.clientX,
+      y: event.clientY
+    };
+  }
+
+  function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
+    const start = pointerStartRef.current;
+    pointerStartRef.current = null;
+
+    if (!start || gallery.length <= 1) {
+      return;
+    }
+
+    const deltaX = event.clientX - start.x;
+    const deltaY = event.clientY - start.y;
+    if (Math.abs(deltaX) < 40 || Math.abs(deltaX) <= Math.abs(deltaY)) {
+      return;
+    }
+
+    if (deltaX < 0) {
+      next();
+      return;
+    }
+
+    prev();
+  }
+
+  function handlePointerCancel() {
+    pointerStartRef.current = null;
+  }
+
+  function handleWheel(event: UIEvent<HTMLDivElement> & { deltaX: number; deltaY: number; shiftKey: boolean }) {
+    if (gallery.length <= 1) {
+      return;
+    }
+
+    const primaryDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.shiftKey ? event.deltaY : 0;
+    if (Math.abs(primaryDelta) < 8) {
+      return;
+    }
+
+    const now = Date.now();
+    if (now - wheelGateRef.current < 250) {
+      return;
+    }
+
+    wheelGateRef.current = now;
+    event.preventDefault();
+    if (primaryDelta > 0) {
+      next();
+      return;
+    }
+
+    prev();
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (gallery.length <= 1) {
+      return;
+    }
+
+    if (event.key === "ArrowLeft") {
+      event.preventDefault();
+      prev();
+      return;
+    }
+
+    if (event.key === "ArrowRight") {
+      event.preventDefault();
+      next();
+    }
+  }
+
   return (
     <div className="space-y-3">
-      <div className="relative aspect-[4/5] w-full overflow-hidden bg-neutral-100">
+      <div
+        className="relative aspect-[4/5] w-full overflow-hidden bg-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400 cursor-grab active:cursor-grabbing"
+        tabIndex={gallery.length > 1 ? 0 : -1}
+        onKeyDown={handleKeyDown}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerCancel}
+        onWheel={handleWheel}
+        style={{ touchAction: "pan-y" }}
+        aria-label={gallery.length > 1 ? `${title} gallery. Use arrow keys or swipe to change images.` : `${title} gallery`}
+      >
         {activeImage ? (
           <img
             src={activeImage}
             alt={`${title} image ${safeIndex + 1}`}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-cover select-none"
             loading="lazy"
+            draggable={false}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-[0.12em] text-neutral-500">
@@ -75,11 +183,12 @@ export default function ProductGallery({ title, images }: Props) {
       </div>
 
       {gallery.length > 1 ? (
-        <div className="flex gap-2 overflow-x-auto pb-1">
+        <div ref={thumbnailStripRef} className="flex gap-2 overflow-x-auto pb-1 scroll-smooth">
           {gallery.map((imageUrl, index) => (
             <button
               key={`${imageUrl}-${index}`}
               type="button"
+              data-gallery-thumb={index}
               className={`relative h-20 w-16 shrink-0 overflow-hidden border ${
                 index === safeIndex ? "border-neutral-700" : "border-neutral-300"
               }`}
