@@ -14,6 +14,7 @@ const WHEEL_GESTURE_THRESHOLD = 28;
 const WHEEL_LINE_DELTA_PX = 18;
 const WHEEL_PAGE_DELTA_PX = 120;
 const WRAP_CUE_MS = 240;
+const WHEEL_MOVE_COOLDOWN_MS = 170;
 
 function normalizeImages(images: string[]) {
   return images.map((item) => item.trim()).filter(Boolean);
@@ -26,10 +27,10 @@ export default function ProductGallery({ title, images }: Props) {
   const [wrapCueDirection, setWrapCueDirection] = useState<GalleryDirection | null>(null);
   const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const wheelGestureRef = useRef<{ delta: number; direction: GalleryDirection | null; locked: boolean }>({
+  const wheelGestureRef = useRef<{ delta: number; direction: GalleryDirection | null; lastMoveAt: number }>({
     delta: 0,
     direction: null,
-    locked: false
+    lastMoveAt: 0
   });
   const wheelResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,7 +78,7 @@ export default function ProductGallery({ title, images }: Props) {
       wheelGestureRef.current = {
         delta: 0,
         direction: null,
-        locked: false
+        lastMoveAt: 0
       };
       wheelResetTimerRef.current = null;
     }, WHEEL_GESTURE_IDLE_MS);
@@ -194,17 +195,21 @@ export default function ProductGallery({ title, images }: Props) {
     const gesture = wheelGestureRef.current;
     if (gesture.direction && gesture.direction !== direction) {
       gesture.delta = 0;
-      gesture.locked = false;
     }
 
     gesture.direction = direction;
     gesture.delta += primaryDelta;
+    const now = Date.now();
 
-    if (gesture.locked || Math.abs(gesture.delta) < WHEEL_GESTURE_THRESHOLD) {
+    if (Math.abs(gesture.delta) < WHEEL_GESTURE_THRESHOLD) {
       return;
     }
 
-    gesture.locked = true;
+    if (now - gesture.lastMoveAt < WHEEL_MOVE_COOLDOWN_MS) {
+      return;
+    }
+
+    gesture.lastMoveAt = now;
     gesture.delta = 0;
     if (direction === "next") {
       next();
