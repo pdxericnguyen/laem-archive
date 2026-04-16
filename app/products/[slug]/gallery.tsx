@@ -188,7 +188,7 @@ export default function ProductGallery({ title, images }: Props) {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
         onWheel={handleWheel}
-        style={{ touchAction: "pan-y" }}
+        style={{ overscrollBehaviorX: "contain", touchAction: "pan-y" }}
         aria-label={gallery.length > 1 ? `${title} gallery. Use arrow keys or swipe to change images.` : `${title} gallery`}
       >
         {activeImage ? (

@@ -236,7 +236,7 @@ export default function CartClient() {
                           value={item.quantity}
                           onChange={(event) => setQuantity(item.slug, Number(event.target.value))}
                           disabled={unavailable}
-                          className="h-9 w-20 border border-neutral-300 px-2 text-sm disabled:bg-neutral-100"
+                          className="h-9 w-20 appearance-none border border-neutral-300 px-0 text-center text-sm leading-none disabled:bg-neutral-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                         <button
                           type="button"

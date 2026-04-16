@@ -108,7 +108,7 @@ export default function ProductActions({
             max={Math.max(1, stock)}
             value={quantity}
             onChange={(event) => updateQuantity(Number(event.target.value))}
-            className="h-10 w-16 text-center text-sm"
+            className="h-10 w-16 appearance-none px-0 text-center text-sm leading-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
             disabled={unavailable}
           />
           <button
