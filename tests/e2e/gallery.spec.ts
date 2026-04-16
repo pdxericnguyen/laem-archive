@@ -1,59 +1,50 @@
 import { expect, test, type Page } from "@playwright/test";
 
-async function wheelGesture(page: Page, deltaX: number, eventCount = 10, gapMs = 10) {
+async function wheelGesture(page: Page, direction: "previous" | "next") {
   const gallery = page.locator("[data-gallery-viewport]");
   const box = await gallery.boundingBox();
   if (!box) {
     throw new Error("Gallery bounds not available");
   }
 
+  const scrollAmount = await gallery.evaluate((element) => element.clientWidth * 0.72);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  for (let i = 0; i < eventCount; i += 1) {
-    await page.mouse.wheel(deltaX, 0);
-    await page.waitForTimeout(gapMs);
-  }
-}
-
-async function wheelLull(page: Page) {
-  await wheelGesture(page, 1, 3, 4);
+  await page.mouse.wheel(direction === "next" ? scrollAmount : -scrollAmount, 0);
 }
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/dev/gallery-sandbox");
-  await expect(page.getByAltText("Gallery test piece image 1")).toBeVisible();
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
 });
 
 test("desktop arrows move and wrap in both directions", async ({ page }) => {
   await page.getByLabel("Next image").click();
-  await expect(page.getByAltText("Gallery test piece image 2")).toBeVisible();
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("2 / 3");
 
   await page.getByLabel("Previous image").click();
-  await expect(page.getByAltText("Gallery test piece image 1")).toBeVisible();
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
 
   await page.getByLabel("Previous image").click();
-  await expect(page.getByAltText("Gallery test piece image 3")).toBeVisible();
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("3 / 3");
 
   await page.getByLabel("Next image").click();
-  await expect(page.getByAltText("Gallery test piece image 1")).toBeVisible();
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
 });
 
-test("desktop wheel gestures advance one image per gesture and wrap", async ({ page }) => {
+test("desktop horizontal wheel gestures snap one image per gesture and wrap at the edges", async ({ page }) => {
   const startUrl = page.url();
 
-  await wheelGesture(page, 7, 12, 8);
-  await expect(page.getByAltText("Gallery test piece image 2")).toBeVisible();
+  await wheelGesture(page, "next");
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("2 / 3");
   await expect(page).toHaveURL(startUrl);
 
-  await wheelGesture(page, 7, 12, 8);
-  await expect(page.getByAltText("Gallery test piece image 2")).toBeVisible();
+  await wheelGesture(page, "next");
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("3 / 3");
 
-  await wheelLull(page);
-  await wheelGesture(page, 7, 12, 8);
-  await expect(page.getByAltText("Gallery test piece image 3")).toBeVisible();
+  await wheelGesture(page, "next");
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
 
-  await wheelLull(page);
-  await wheelGesture(page, 7, 12, 8);
-  await expect(page.getByAltText("Gallery test piece image 1")).toBeVisible();
-
+  await wheelGesture(page, "previous");
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("3 / 3");
   await expect(page).toHaveURL(startUrl);
 });

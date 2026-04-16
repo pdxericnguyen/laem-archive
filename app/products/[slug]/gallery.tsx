@@ -1,8 +1,6 @@
 "use client";
 
-import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import useEmblaCarousel from "embla-carousel-react";
-import { WheelGesturesPlugin } from "embla-carousel-wheel-gestures";
+import { type KeyboardEvent, type UIEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   title: string;
@@ -12,6 +10,8 @@ type Props = {
 type GalleryDirection = "previous" | "next";
 
 const WRAP_CUE_MS = 240;
+const WHEEL_WRAP_BLOCK_MS = 360;
+const PROGRAMMATIC_SCROLL_MS = 420;
 
 function normalizeImages(images: string[]) {
   return images.map((item) => item.trim()).filter(Boolean);
@@ -19,24 +19,16 @@ function normalizeImages(images: string[]) {
 
 export default function ProductGallery({ title, images }: Props) {
   const gallery = useMemo(() => normalizeImages(images), [images]);
-  const wheelPlugins = useMemo(
-    () => (gallery.length > 1 ? [WheelGesturesPlugin({ forceWheelAxis: "x" })] : []),
-    [gallery.length]
-  );
-  const [emblaRef, emblaApi] = useEmblaCarousel(
-    {
-      align: "start",
-      loop: gallery.length > 1,
-      skipSnaps: false
-    },
-    wheelPlugins
-  );
   const [activeIndex, setActiveIndex] = useState(0);
   const [transitionDirection, setTransitionDirection] = useState<GalleryDirection>("next");
   const [wrapCueDirection, setWrapCueDirection] = useState<GalleryDirection | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
   const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
   const activeIndexRef = useRef(0);
   const wrapCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wheelWrapBlockRef = useRef<{ direction: GalleryDirection; until: number } | null>(null);
+  const programmaticScrollTargetRef = useRef<number | null>(null);
+  const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const hasImages = gallery.length > 0;
 
@@ -60,10 +52,26 @@ export default function ProductGallery({ title, images }: Props) {
       if (wrapCueTimerRef.current) {
         clearTimeout(wrapCueTimerRef.current);
       }
+      if (programmaticScrollTimerRef.current) {
+        clearTimeout(programmaticScrollTimerRef.current);
+      }
     };
   }, []);
 
-  const triggerWrapCue = useCallback((direction: GalleryDirection) => {
+  useEffect(() => {
+    if (gallery.length <= 0) {
+      activeIndexRef.current = 0;
+      setActiveIndex(0);
+      return;
+    }
+
+    if (activeIndexRef.current >= gallery.length) {
+      activeIndexRef.current = gallery.length - 1;
+      setActiveIndex(gallery.length - 1);
+    }
+  }, [gallery.length]);
+
+  function triggerWrapCue(direction: GalleryDirection) {
     if (wrapCueTimerRef.current) {
       clearTimeout(wrapCueTimerRef.current);
     }
@@ -73,64 +81,151 @@ export default function ProductGallery({ title, images }: Props) {
       setWrapCueDirection(null);
       wrapCueTimerRef.current = null;
     }, WRAP_CUE_MS);
-  }, []);
+  }
 
-  const syncSelection = useCallback(() => {
-    if (!emblaApi) {
+  function clearProgrammaticScroll() {
+    if (programmaticScrollTimerRef.current) {
+      clearTimeout(programmaticScrollTimerRef.current);
+      programmaticScrollTimerRef.current = null;
+    }
+    programmaticScrollTargetRef.current = null;
+  }
+
+  function setSelectedIndex(nextIndex: number, direction: GalleryDirection, wrapped = false) {
+    if (gallery.length <= 0) {
       return;
     }
 
-    const nextIndex = emblaApi.selectedScrollSnap();
     const previousIndex = activeIndexRef.current;
-    if (gallery.length > 1) {
-      if (previousIndex === gallery.length - 1 && nextIndex === 0) {
-        triggerWrapCue("next");
-      } else if (previousIndex === 0 && nextIndex === gallery.length - 1) {
-        triggerWrapCue("previous");
-      }
-    }
-
-    setTransitionDirection(nextIndex >= previousIndex ? "next" : "previous");
+    setTransitionDirection(direction);
     activeIndexRef.current = nextIndex;
     setActiveIndex(nextIndex);
-  }, [emblaApi, gallery.length, triggerWrapCue]);
 
-  useEffect(() => {
-    if (!emblaApi) {
+    const viewport = viewportRef.current;
+    if (viewport) {
+      clearProgrammaticScroll();
+      programmaticScrollTargetRef.current = nextIndex;
+      const shouldAnimate = !wrapped && Math.abs(nextIndex - previousIndex) === 1;
+
+      viewport.scrollTo({
+        left: nextIndex * viewport.clientWidth,
+        behavior: shouldAnimate ? "smooth" : "auto"
+      });
+
+      programmaticScrollTimerRef.current = setTimeout(
+        clearProgrammaticScroll,
+        shouldAnimate ? PROGRAMMATIC_SCROLL_MS : 40
+      );
+    }
+
+    if (wrapped) {
+      triggerWrapCue(direction);
+    }
+  }
+
+  function move(direction: GalleryDirection) {
+    if (gallery.length <= 1) {
       return;
     }
 
-    syncSelection();
-    emblaApi.on("select", syncSelection);
-    emblaApi.on("reInit", syncSelection);
+    const current = activeIndexRef.current;
+    const nextIndex = direction === "next" ? current + 1 : current - 1;
+    if (nextIndex < 0) {
+      setSelectedIndex(gallery.length - 1, direction, true);
+      return;
+    }
+    if (nextIndex >= gallery.length) {
+      setSelectedIndex(0, direction, true);
+      return;
+    }
 
-    return () => {
-      emblaApi.off("select", syncSelection);
-      emblaApi.off("reInit", syncSelection);
-    };
-  }, [emblaApi, syncSelection]);
-
-  useEffect(() => {
-    emblaApi?.reInit();
-  }, [emblaApi, gallery.length]);
+    setSelectedIndex(nextIndex, direction);
+  }
 
   function prev() {
-    setTransitionDirection("previous");
-    emblaApi?.scrollPrev();
+    move("previous");
   }
 
   function next() {
-    setTransitionDirection("next");
-    emblaApi?.scrollNext();
+    move("next");
   }
 
   function scrollTo(index: number) {
-    if (!emblaApi || index === activeIndex) {
+    if (index === activeIndex) {
       return;
     }
 
-    setTransitionDirection(index > activeIndex ? "next" : "previous");
-    emblaApi.scrollTo(index);
+    setSelectedIndex(index, index > activeIndex ? "next" : "previous");
+  }
+
+  function handleScroll(event: UIEvent<HTMLDivElement>) {
+    const viewport = event.currentTarget;
+    if (gallery.length <= 1 || viewport.clientWidth <= 0) {
+      return;
+    }
+
+    const programmaticTarget = programmaticScrollTargetRef.current;
+    if (programmaticTarget !== null) {
+      const targetLeft = programmaticTarget * viewport.clientWidth;
+      if (Math.abs(viewport.scrollLeft - targetLeft) < 2) {
+        clearProgrammaticScroll();
+      }
+      return;
+    }
+
+    const nextIndex = Math.max(
+      0,
+      Math.min(gallery.length - 1, Math.round(viewport.scrollLeft / viewport.clientWidth))
+    );
+    const previousIndex = activeIndexRef.current;
+    if (nextIndex === previousIndex) {
+      return;
+    }
+
+    setTransitionDirection(nextIndex > previousIndex ? "next" : "previous");
+    activeIndexRef.current = nextIndex;
+    setActiveIndex(nextIndex);
+  }
+
+  function handleWheel(event: WheelEvent<HTMLDivElement>) {
+    if (gallery.length <= 1) {
+      return;
+    }
+
+    const horizontalDelta = event.deltaX;
+    if (horizontalDelta === 0) {
+      return;
+    }
+
+    const now = window.performance.now();
+    const blockedWrap = wheelWrapBlockRef.current;
+    if (blockedWrap) {
+      if (now >= blockedWrap.until) {
+        wheelWrapBlockRef.current = null;
+      } else {
+        const isSameDirection =
+          blockedWrap.direction === "next" ? horizontalDelta > 0 : horizontalDelta < 0;
+        if (isSameDirection) {
+          event.preventDefault();
+          return;
+        }
+        wheelWrapBlockRef.current = null;
+      }
+    }
+
+    const current = activeIndexRef.current;
+    if (current === gallery.length - 1 && horizontalDelta > 0) {
+      event.preventDefault();
+      wheelWrapBlockRef.current = { direction: "next", until: now + WHEEL_WRAP_BLOCK_MS };
+      setSelectedIndex(0, "next", true);
+      return;
+    }
+
+    if (current === 0 && horizontalDelta < 0) {
+      event.preventDefault();
+      wheelWrapBlockRef.current = { direction: "previous", until: now + WHEEL_WRAP_BLOCK_MS };
+      setSelectedIndex(gallery.length - 1, "previous", true);
+    }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -153,7 +248,7 @@ export default function ProductGallery({ title, images }: Props) {
   return (
     <div className="space-y-3">
       <div
-        className={`relative aspect-[4/5] w-full overflow-hidden bg-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400 cursor-grab active:cursor-grabbing ${
+        className={`relative aspect-[4/5] w-full overflow-hidden bg-neutral-100 focus:outline-none focus:ring-2 focus:ring-neutral-400 ${
           wrapCueDirection ? `gallery-wrap-cue-${wrapCueDirection}` : ""
         }`}
         tabIndex={gallery.length > 1 ? 0 : -1}
@@ -162,10 +257,16 @@ export default function ProductGallery({ title, images }: Props) {
         aria-label={gallery.length > 1 ? `${title} gallery. Use arrow keys or swipe to change images.` : `${title} gallery`}
       >
         {hasImages ? (
-          <div ref={emblaRef} data-gallery-viewport className="h-full overflow-hidden">
-            <div className="flex h-full touch-pan-y">
+          <div
+            ref={viewportRef}
+            data-gallery-viewport
+            className="gallery-scroll h-full overflow-x-auto overflow-y-hidden"
+            onScroll={handleScroll}
+            onWheel={handleWheel}
+          >
+            <div className="flex h-full">
               {gallery.map((imageUrl, index) => (
-                <div key={`${imageUrl}-${index}`} className="h-full min-w-0 flex-[0_0_100%]">
+                <div key={`${imageUrl}-${index}`} className="gallery-slide h-full min-w-0 flex-[0_0_100%]">
                   <img
                     src={imageUrl}
                     alt={`${title} image ${index + 1}`}
@@ -196,7 +297,10 @@ export default function ProductGallery({ title, images }: Props) {
             >
               {"<"}
             </button>
-            <div className="rounded border border-neutral-300 bg-white/90 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-neutral-700">
+            <div
+              data-gallery-counter
+              className="rounded border border-neutral-300 bg-white/90 px-2 py-1 text-[11px] uppercase tracking-[0.12em] text-neutral-700"
+            >
               {activeIndex + 1} / {gallery.length}
             </div>
             <button
@@ -237,6 +341,21 @@ export default function ProductGallery({ title, images }: Props) {
       ) : null}
 
       <style jsx>{`
+        .gallery-scroll {
+          scrollbar-width: none;
+          scroll-snap-type: x mandatory;
+          touch-action: pan-y pinch-zoom;
+        }
+
+        .gallery-scroll::-webkit-scrollbar {
+          display: none;
+        }
+
+        .gallery-slide {
+          scroll-snap-align: start;
+          scroll-snap-stop: always;
+        }
+
         .gallery-wrap-cue-next::after,
         .gallery-wrap-cue-previous::after {
           content: "";
@@ -290,6 +409,10 @@ export default function ProductGallery({ title, images }: Props) {
         }
 
         @media (prefers-reduced-motion: reduce) {
+          .gallery-scroll {
+            scroll-behavior: auto;
+          }
+
           .gallery-image-next,
           .gallery-image-previous {
             transition-duration: 0ms;
