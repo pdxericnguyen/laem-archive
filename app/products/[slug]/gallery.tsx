@@ -7,6 +7,8 @@ type Props = {
   images: string[];
 };
 
+type GalleryDirection = "previous" | "next";
+
 function normalizeImages(images: string[]) {
   return images.map((item) => item.trim()).filter(Boolean);
 }
@@ -14,6 +16,7 @@ function normalizeImages(images: string[]) {
 export default function ProductGallery({ title, images }: Props) {
   const gallery = useMemo(() => normalizeImages(images), [images]);
   const [activeIndex, setActiveIndex] = useState(0);
+  const [transitionDirection, setTransitionDirection] = useState<GalleryDirection>("next");
   const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
   const wheelGateRef = useRef(0);
@@ -37,13 +40,15 @@ export default function ProductGallery({ title, images }: Props) {
     });
   }, [safeIndex]);
 
-  function move(step: -1 | 1) {
+  function move(direction: GalleryDirection) {
     if (gallery.length <= 1) {
       return;
     }
 
+    setTransitionDirection(direction);
     setActiveIndex((value) => {
       const currentIndex = Math.min(gallery.length - 1, Math.max(0, value));
+      const step = direction === "next" ? 1 : -1;
       const nextIndex = currentIndex + step;
       if (nextIndex < 0) {
         return gallery.length - 1;
@@ -56,11 +61,11 @@ export default function ProductGallery({ title, images }: Props) {
   }
 
   function prev() {
-    move(-1);
+    move("previous");
   }
 
   function next() {
-    move(1);
+    move("next");
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -164,13 +169,12 @@ export default function ProductGallery({ title, images }: Props) {
       >
         {activeImage ? (
           <img
-            key={activeImage}
+            key={`${activeImage}-${transitionDirection}`}
             src={activeImage}
             alt={`${title} image ${safeIndex + 1}`}
-            className="h-full w-full object-cover select-none"
+            className={`h-full w-full object-cover select-none gallery-image-${transitionDirection}`}
             loading="lazy"
             draggable={false}
-            style={{ animation: "gallery-fade 220ms ease-out" }}
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-[0.12em] text-neutral-500">
@@ -228,13 +232,35 @@ export default function ProductGallery({ title, images }: Props) {
       ) : null}
 
       <style jsx>{`
-        @keyframes gallery-fade {
+        .gallery-image-next {
+          animation: gallery-slide-next 220ms ease-out;
+        }
+
+        .gallery-image-previous {
+          animation: gallery-slide-previous 220ms ease-out;
+        }
+
+        @keyframes gallery-slide-next {
           from {
             opacity: 0.72;
+            transform: translateX(14px);
           }
 
           to {
             opacity: 1;
+            transform: translateX(0);
+          }
+        }
+
+        @keyframes gallery-slide-previous {
+          from {
+            opacity: 0.72;
+            transform: translateX(-14px);
+          }
+
+          to {
+            opacity: 1;
+            transform: translateX(0);
           }
         }
       `}</style>
