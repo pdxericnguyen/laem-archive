@@ -1,6 +1,9 @@
 import { summarizeReservationHoldsForSlugs, type ReservationHoldSummary } from "@/lib/inventory";
 import { hasKvEnv, kv } from "@/lib/kv";
 import type { Product } from "@/lib/store";
+import AdminCommandPalette from "../command-palette";
+import AdminSystemHealthBanner from "../system-health-banner";
+import UnsavedChangesGuard from "../unsaved-changes-guard";
 import BulkStockEditor from "./stock-bulk";
 import ImageUploadField from "./image-upload-field";
 
@@ -264,7 +267,9 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
   if (!hasKvEnv()) {
     return (
       <main className="mx-auto max-w-6xl px-4 py-10 space-y-4">
+        <AdminSystemHealthBanner />
         <h1 className="text-lg font-semibold tracking-tight">Admin Products</h1>
+        <AdminCommandPalette />
         <p className="text-sm text-neutral-600">Redis is not configured.</p>
       </main>
     );
@@ -322,6 +327,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10 space-y-10">
+      <AdminSystemHealthBanner />
       <header className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-lg font-semibold tracking-tight">Admin Products</h1>
@@ -347,6 +353,8 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
           </div>
         ) : null}
       </header>
+      <AdminCommandPalette />
+      <UnsavedChangesGuard selector='form[action="/api/admin/products/save"]' />
 
       <section className="space-y-3">
         <div className="flex flex-wrap gap-2">

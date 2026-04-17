@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { listOrdersPage } from "@/lib/orders";
-import type { OrderStatusFilter, StripeObjectType } from "@/lib/orders";
+import type { OrderQueueFilter, OrderStatusFilter, StripeObjectType } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 
 function getStripeDashboardUrl(
@@ -37,6 +37,14 @@ export async function GET(req: Request) {
     statusParam === "conflict_resolved"
       ? statusParam
       : "all";
+  const queueParam = url.searchParams.get("queue");
+  const queue: OrderQueueFilter =
+    queueParam === "paid_unfulfilled" ||
+    queueParam === "address_missing" ||
+    queueParam === "print_failed" ||
+    queueParam === "conflicts"
+      ? queueParam
+      : "all";
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
   const fromUnix = fromParam ? Math.floor(new Date(`${fromParam}T00:00:00Z`).getTime() / 1000) : null;
@@ -54,6 +62,7 @@ export async function GET(req: Request) {
     limit,
     page,
     status,
+    queue,
     fromUnix,
     toUnix
   });

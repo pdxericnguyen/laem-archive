@@ -2,6 +2,12 @@ import { key, kv } from "@/lib/kv";
 
 export type OrderStatus = "paid" | "shipped" | "stock_conflict" | "conflict_resolved";
 export type OrderStatusFilter = "all" | OrderStatus;
+export type OrderQueueFilter =
+  | "all"
+  | "paid_unfulfilled"
+  | "address_missing"
+  | "print_failed"
+  | "conflicts";
 export type OrderChannel = "checkout" | "terminal";
 export type StripeObjectType = "checkout_session" | "payment_intent";
 
@@ -426,6 +432,7 @@ export type ListOrdersOptions = {
   limit: number;
   page: number;
   status?: OrderStatusFilter;
+  queue?: OrderQueueFilter;
   fromUnix?: number | null;
   toUnix?: number | null;
 };
@@ -441,10 +448,35 @@ export type ListOrdersResult = {
 function matchesFilters(
   row: OrderRecord,
   status: OrderStatusFilter,
+  queue: OrderQueueFilter,
   fromUnix: number | null,
   toUnix: number | null
 ) {
   if (status !== "all" && row.status !== status) {
+    return false;
+  }
+  if (queue === "paid_unfulfilled" && row.status !== "paid") {
+    return false;
+  }
+  if (queue === "address_missing") {
+    if (row.status !== "paid") {
+      return false;
+    }
+    if (row.channel === "terminal") {
+      return false;
+    }
+    if (row.shippingAddress?.line1) {
+      return false;
+    }
+  }
+  if (queue === "print_failed") {
+    const failed =
+      row.printing?.packingSlip?.status === "failed" || row.printing?.shippingLabel?.status === "failed";
+    if (!failed) {
+      return false;
+    }
+  }
+  if (queue === "conflicts" && row.status !== "stock_conflict" && row.status !== "conflict_resolved") {
     return false;
   }
   if (typeof fromUnix === "number" && row.created < fromUnix) {
@@ -460,6 +492,7 @@ export async function listOrdersPage(options: ListOrdersOptions): Promise<ListOr
   const limit = Math.min(50, Math.max(1, Math.floor(options.limit)));
   const requestedPage = Math.max(1, Math.floor(options.page));
   const status = options.status || "all";
+  const queue = options.queue || "all";
   const fromUnix = typeof options.fromUnix === "number" ? options.fromUnix : null;
   const toUnix = typeof options.toUnix === "number" ? options.toUnix : null;
 
@@ -467,7 +500,7 @@ export async function listOrdersPage(options: ListOrdersOptions): Promise<ListOr
   const rows = await Promise.all(ids.map((id) => readOrder(id)));
   const filtered = rows
     .filter((row): row is OrderRecord => Boolean(row))
-    .filter((row) => matchesFilters(row, status, fromUnix, toUnix))
+    .filter((row) => matchesFilters(row, status, queue, fromUnix, toUnix))
     .sort((a, b) => b.created - a.created);
 
   const total = filtered.length;

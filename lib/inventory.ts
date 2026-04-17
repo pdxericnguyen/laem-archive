@@ -216,7 +216,7 @@ function parseNumberResult(value: unknown, fallback = 0) {
   return fallback;
 }
 
-function getLowStockThreshold() {
+export function getLowStockThreshold() {
   const configured = Number(process.env.LOW_STOCK_THRESHOLD || "2");
   if (!Number.isFinite(configured)) {
     return 2;

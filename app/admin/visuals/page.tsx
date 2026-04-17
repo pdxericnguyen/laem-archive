@@ -1,6 +1,9 @@
 import AdminVisualBulkActions from "./bulk-actions";
 import ImageUploadField from "@/app/admin/products/image-upload-field";
 import { hasKvEnv } from "@/lib/kv";
+import AdminCommandPalette from "../command-palette";
+import AdminSystemHealthBanner from "../system-health-banner";
+import UnsavedChangesGuard from "../unsaved-changes-guard";
 import {
   getSiteVisualsForAdmin,
   SITE_VISUAL_PLACEMENTS,
@@ -84,7 +87,9 @@ export default async function AdminVisualsPage({ searchParams }: AdminVisualsPag
   if (!hasKvEnv()) {
     return (
       <main className="mx-auto max-w-6xl px-4 py-10 space-y-4">
+        <AdminSystemHealthBanner />
         <h1 className="text-lg font-semibold tracking-tight">Site Visuals</h1>
+        <AdminCommandPalette />
         <p className="text-sm text-neutral-600">Redis is not configured.</p>
       </main>
     );
@@ -101,6 +106,7 @@ export default async function AdminVisualsPage({ searchParams }: AdminVisualsPag
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10 space-y-8">
+      <AdminSystemHealthBanner />
       <header className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-lg font-semibold tracking-tight">Site Visuals</h1>
@@ -115,6 +121,8 @@ export default async function AdminVisualsPage({ searchParams }: AdminVisualsPag
           Manage fixed ad and campaign image locations across the public site. Publish a slot only when it has an image.
         </p>
       </header>
+      <AdminCommandPalette />
+      <UnsavedChangesGuard selector='form[action="/api/admin/visuals/save"]' />
 
       {message ? (
         <div
