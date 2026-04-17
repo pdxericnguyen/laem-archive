@@ -5,7 +5,7 @@ module.exports = {
       colors: {
         silver: {
           DEFAULT: "#1F1F1F",
-          hover: "#3A3A3A",
+          hover: "#5A5A5A",
           active: "#111111",
           text: "#FAFAFA",
           border: "#1F1F1F",
