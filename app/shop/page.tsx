@@ -1,5 +1,5 @@
 import { getShopItems } from "@/lib/store";
-import { cleanupExpiredInventoryReservations, getAvailableStockForSlugs } from "@/lib/inventory";
+import { getAvailableStockForSlugs } from "@/lib/inventory";
 import AddToCartButton from "@/components/AddToCartButton";
 
 export const metadata = { title: "Shop | LAEM Archive" };
@@ -14,7 +14,6 @@ export default async function ShopPage() {
   let availableStockBySlug: Record<string, number> = {};
 
   if (items.length > 0) {
-    await cleanupExpiredInventoryReservations();
     availableStockBySlug = await getAvailableStockForSlugs(items.map((item) => item.slug));
   }
 

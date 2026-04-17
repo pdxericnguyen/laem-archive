@@ -68,10 +68,12 @@ export async function syncProductStockAndArchiveState(slug: string, stockValue: 
   const stock = Math.max(0, Math.floor(stockValue));
   return updateProductSnapshot(slug, (product) => {
     const shouldAutoArchive = Boolean(product.autoArchiveOnZero) && stock <= 0;
+    const shouldRestoreFromAutoArchive =
+      Boolean(product.autoArchiveOnZero) && Boolean(product.archived) && product.stock <= 0 && stock > 0;
     return {
       ...product,
       stock,
-      archived: shouldAutoArchive ? true : Boolean(product.archived)
+      archived: shouldAutoArchive ? true : shouldRestoreFromAutoArchive ? false : Boolean(product.archived)
     };
   });
 }
@@ -425,14 +427,21 @@ export async function reconcileReservedStockForSlugs(
 
 export async function getAvailableStockForSlugs(slugs: string[]): Promise<Record<string, number>> {
   const uniqueSlugs = [...new Set(slugs.map((slug) => slug.trim()).filter(Boolean))];
-  const rows = await Promise.all(
-    uniqueSlugs.map(async (slug) => {
-      const [stock, reserved] = await Promise.all([getStock(slug), getReservedStock(slug)]);
+  if (uniqueSlugs.length === 0) {
+    return {};
+  }
+
+  const [stockRows, holdSummaries] = await Promise.all([
+    Promise.all(uniqueSlugs.map(async (slug) => [slug, await getStock(slug)] as const)),
+    summarizeReservationHoldsForSlugs(uniqueSlugs)
+  ]);
+
+  return Object.fromEntries(
+    stockRows.map(([slug, stock]) => {
+      const reserved = holdSummaries[slug]?.reservedStock || 0;
       return [slug, Math.max(0, stock - reserved)] as const;
     })
   );
-
-  return Object.fromEntries(rows);
 }
 
 export async function getAvailableStock(slug: string): Promise<number> {

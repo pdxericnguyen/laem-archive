@@ -1,5 +1,5 @@
 import { getProduct } from "@/lib/store";
-import { cleanupExpiredInventoryReservations, getAvailableStock } from "@/lib/inventory";
+import { getAvailableStock } from "@/lib/inventory";
 import ProductGallery from "./gallery";
 import ProductActions from "./actions";
 
@@ -16,7 +16,6 @@ export default async function ProductPage({ params }: { params: { slug: string }
     );
   }
 
-  await cleanupExpiredInventoryReservations();
   const availableStock = await getAvailableStock(product.slug);
   const isUnavailable = product.archived || availableStock <= 0;
   const description =
