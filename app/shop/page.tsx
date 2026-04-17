@@ -1,6 +1,8 @@
 import { getShopItems } from "@/lib/store";
 import { getAvailableStockForSlugs } from "@/lib/inventory";
+import { getSiteVisual } from "@/lib/site-visuals";
 import AddToCartButton from "@/components/AddToCartButton";
+import SiteVisualPlacement from "@/components/SiteVisualPlacement";
 
 export const metadata = { title: "Shop | LAEM Archive" };
 export const dynamic = "force-dynamic";
@@ -10,7 +12,10 @@ function money(cents: number) {
 }
 
 export default async function ShopPage() {
-  const items = await getShopItems();
+  const [items, shopBanner] = await Promise.all([
+    getShopItems(),
+    getSiteVisual("shop.banner")
+  ]);
   let availableStockBySlug: Record<string, number> = {};
 
   if (items.length > 0) {
@@ -23,6 +28,8 @@ export default async function ShopPage() {
         <h1 className="text-lg md:text-xl font-semibold tracking-tight">Shop</h1>
         <p className="text-sm text-neutral-600">Current availability.</p>
       </header>
+
+      <SiteVisualPlacement visual={shopBanner} variant="banner" />
 
       {items.length === 0 ? (
         <section className="border border-neutral-200 p-6 text-sm text-neutral-600">

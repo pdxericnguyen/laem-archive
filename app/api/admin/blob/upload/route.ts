@@ -5,6 +5,7 @@ import { requireAdminOrThrow } from "@/lib/require-admin";
 
 export const runtime = "nodejs";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const ALLOWED_FOLDERS = new Set(["products", "site-visuals"]);
 
 function sanitizeFileName(fileName: string) {
   return fileName
@@ -35,7 +36,12 @@ export async function POST(request: Request) {
   }
 
   const safeName = sanitizeFileName(file.name || "image");
-  const filePath = `products/${Date.now()}-${safeName || "image"}`;
+  const requestedFolder = formData.get("folder");
+  const folder =
+    typeof requestedFolder === "string" && ALLOWED_FOLDERS.has(requestedFolder)
+      ? requestedFolder
+      : "products";
+  const filePath = `${folder}/${Date.now()}-${safeName || "image"}`;
   const token = process.env.BLOB_READ_WRITE_TOKEN;
 
   try {

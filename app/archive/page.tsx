@@ -1,4 +1,6 @@
 import { getArchiveItems } from "@/lib/store";
+import { getSiteVisual } from "@/lib/site-visuals";
+import SiteVisualPlacement from "@/components/SiteVisualPlacement";
 
 export const metadata = { title: "Archive | LAEM Archive" };
 export const dynamic = "force-dynamic";
@@ -8,7 +10,10 @@ function money(cents: number) {
 }
 
 export default async function ArchivePage() {
-  const items = await getArchiveItems();
+  const [items, archiveBanner] = await Promise.all([
+    getArchiveItems(),
+    getSiteVisual("archive.banner")
+  ]);
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 md:py-10 space-y-6">
@@ -16,6 +21,8 @@ export default async function ArchivePage() {
         <h1 className="text-lg md:text-xl font-semibold tracking-tight">Archive</h1>
         <p className="text-sm text-neutral-600">Previous objects. No longer available.</p>
       </header>
+
+      <SiteVisualPlacement visual={archiveBanner} variant="banner" />
 
       {items.length === 0 ? (
         <section className="border border-neutral-200 p-6 text-sm text-neutral-600">

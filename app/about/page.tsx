@@ -1,20 +1,30 @@
+import SiteVisualPlacement from "@/components/SiteVisualPlacement";
+import { getSiteVisual } from "@/lib/site-visuals";
+
 export const metadata = {
   title: "About | LAEM Archive",
   description: "Hand-finished silver objects produced in small runs."
 };
+export const dynamic = "force-dynamic";
 
-export default function AboutPage() {
+export default async function AboutPage() {
+  const aboutHero = await getSiteVisual("about.hero");
+
   return (
     <main className="mx-auto max-w-6xl px-4 py-10 space-y-12">
       <section className="space-y-6">
-        <div className="relative aspect-[16/9] w-full overflow-hidden bg-neutral-100">
-          <img
-            src="https://via.placeholder.com/1600x900"
-            alt="Studio documentation"
-            className="h-full w-full object-cover"
-            loading="lazy"
-          />
-        </div>
+        {aboutHero ? (
+          <SiteVisualPlacement visual={aboutHero} variant="inline" />
+        ) : (
+          <div className="relative aspect-[16/9] w-full overflow-hidden bg-neutral-100">
+            <img
+              src="https://via.placeholder.com/1600x900"
+              alt="Studio documentation"
+              className="h-full w-full object-cover"
+              loading="lazy"
+            />
+          </div>
+        )}
 
         <div className="max-w-3xl space-y-3">
           <p className="text-xs uppercase tracking-[0.12em] text-neutral-600">About</p>

@@ -1,4 +1,14 @@
-export default function Home() {
+import SiteVisualPlacement from "@/components/SiteVisualPlacement";
+import { getSiteVisual } from "@/lib/site-visuals";
+
+export const dynamic = "force-dynamic";
+
+export default async function Home() {
+  const [heroVisual, promoVisual] = await Promise.all([
+    getSiteVisual("home.hero"),
+    getSiteVisual("home.promo")
+  ]);
+
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 md:py-10 space-y-8">
       <header className="space-y-2">
@@ -8,6 +18,8 @@ export default function Home() {
           Small runs. Hand-finished.
         </p>
       </header>
+
+      <SiteVisualPlacement visual={heroVisual} variant="hero" />
 
       <div className="flex flex-wrap gap-3 text-sm">
         <a className="h-11 px-4 border border-neutral-300 inline-flex items-center justify-center no-underline hover:bg-neutral-50" href="/shop">
@@ -20,6 +32,8 @@ export default function Home() {
           Cart
         </a>
       </div>
+
+      <SiteVisualPlacement visual={promoVisual} variant="inline" />
     </main>
   );
 }

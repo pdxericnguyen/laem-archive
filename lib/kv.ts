@@ -52,7 +52,8 @@ export const key = {
   reservation: (sessionId: string) => `reservation:${sessionId}`,
   reservationsExpiring: "reservations:expiring",
   archived: (slug: string) => `archived:${slug}`,
-  published: (slug: string) => `published:${slug}`
+  published: (slug: string) => `published:${slug}`,
+  siteVisual: (placement: string) => `site-visual:${placement}`
 };
 
 export function hasKvEnv() {

@@ -5,6 +5,14 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 type Props = {
   name: string;
   defaultValue?: string;
+  label?: string;
+  helperText?: string;
+  placeholder?: string;
+  previewAlt?: string;
+  emptyLabel?: string;
+  uploadFolder?: "products" | "site-visuals";
+  allowMultiple?: boolean;
+  aspectClassName?: string;
 };
 
 function appendLines(base: string, lines: string[]) {
@@ -19,7 +27,18 @@ function appendLines(base: string, lines: string[]) {
   return `${normalized}\n${next}`;
 }
 
-export default function ImageUploadField({ name, defaultValue = "" }: Props) {
+export default function ImageUploadField({
+  name,
+  defaultValue = "",
+  label = "Images (one per line)",
+  helperText = "Click the image frame or the plus box to upload directly to Blob.",
+  placeholder = "One image URL per line",
+  previewAlt = "Image preview",
+  emptyLabel = "Upload image",
+  uploadFolder = "products",
+  allowMultiple = true,
+  aspectClassName = "aspect-[4/5]"
+}: Props) {
   const [value, setValue] = useState(defaultValue);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
@@ -63,6 +82,7 @@ export default function ImageUploadField({ name, defaultValue = "" }: Props) {
       for (const file of files) {
         const formData = new FormData();
         formData.append("file", file);
+        formData.append("folder", uploadFolder);
 
         const response = await fetch("/api/admin/blob/upload", {
           method: "POST",
@@ -76,7 +96,7 @@ export default function ImageUploadField({ name, defaultValue = "" }: Props) {
         uploadedUrls.push(payload.url);
       }
 
-      setValue((current) => appendLines(current, uploadedUrls));
+      setValue((current) => (allowMultiple ? appendLines(current, uploadedUrls) : uploadedUrls[0] || current));
       if (imageUrls.length === 0 && uploadedUrls.length > 0) {
         setSelectedIndex(0);
       }
@@ -111,7 +131,7 @@ export default function ImageUploadField({ name, defaultValue = "" }: Props) {
   return (
     <div className="grid gap-2">
       <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">
-        Images (one per line)
+        {label}
       </span>
 
       <div className="grid gap-3 lg:grid-cols-[320px_1fr]">
@@ -119,17 +139,17 @@ export default function ImageUploadField({ name, defaultValue = "" }: Props) {
           <button
             type="button"
             onClick={openPicker}
-            className="group relative block w-full overflow-hidden border border-neutral-300 bg-neutral-50 aspect-[4/5] hover:bg-neutral-100"
+            className={`group relative block w-full overflow-hidden border border-neutral-300 bg-neutral-50 hover:bg-neutral-100 ${aspectClassName}`}
           >
             {selectedImageUrl ? (
               <img
                 src={selectedImageUrl}
-                alt="Product preview"
+                alt={previewAlt}
                 className="h-full w-full object-cover"
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center px-4 text-center text-xs text-neutral-500">
-                {uploading ? "Uploading..." : "Upload image"}
+                {uploading ? "Uploading..." : emptyLabel}
               </div>
             )}
             <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-white/90 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-700">
@@ -165,14 +185,14 @@ export default function ImageUploadField({ name, defaultValue = "" }: Props) {
         <div className="space-y-2">
           <textarea
             name={name}
-            rows={6}
+            rows={allowMultiple ? 6 : 3}
             className="border border-neutral-300 p-3"
             value={value}
             onChange={(event) => setValue(event.target.value)}
-            placeholder="One image URL per line"
+            placeholder={placeholder}
           />
           <p className="text-[11px] text-neutral-500">
-            Click the image frame or the plus box to upload directly to Blob.
+            {helperText}
           </p>
         </div>
       </div>
@@ -182,7 +202,7 @@ export default function ImageUploadField({ name, defaultValue = "" }: Props) {
           ref={fileInputRef}
           type="file"
           accept="image/*"
-          multiple
+          multiple={allowMultiple}
           onChange={onFileInputChange}
           className="hidden"
         />
