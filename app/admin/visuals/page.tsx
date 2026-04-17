@@ -101,16 +101,19 @@ export default async function AdminVisualsPage({ searchParams }: AdminVisualsPag
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10 space-y-8">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-2">
-          <a href="/admin" className="text-xs uppercase tracking-[0.12em] text-neutral-500 no-underline hover:text-neutral-900">
-            Back to admin
-          </a>
+      <header className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-lg font-semibold tracking-tight">Site Visuals</h1>
-          <p className="max-w-2xl text-sm text-neutral-600">
-            Manage fixed ad and campaign image locations across the public site. Publish a slot only when it has an image.
-          </p>
+          <a
+            href="/admin"
+            className="inline-flex h-10 items-center border border-neutral-300 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-700 no-underline hover:bg-neutral-50"
+          >
+            Back to Admin
+          </a>
         </div>
+        <p className="max-w-2xl text-sm text-neutral-600">
+          Manage fixed ad and campaign image locations across the public site. Publish a slot only when it has an image.
+        </p>
       </header>
 
       {message ? (
