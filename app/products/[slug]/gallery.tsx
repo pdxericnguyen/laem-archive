@@ -72,6 +72,9 @@ export default function ProductGallery({ title, images }: Props) {
       return;
     }
 
+    if (event.currentTarget.setPointerCapture) {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
     pointerStartRef.current = {
       x: event.clientX,
       y: event.clientY
@@ -81,6 +84,9 @@ export default function ProductGallery({ title, images }: Props) {
   function handlePointerUp(event: PointerEvent<HTMLDivElement>) {
     const start = pointerStartRef.current;
     pointerStartRef.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
 
     if (!start || gallery.length <= 1) {
       return;
@@ -100,7 +106,10 @@ export default function ProductGallery({ title, images }: Props) {
     prev();
   }
 
-  function handlePointerCancel() {
+  function handlePointerCancel(event: PointerEvent<HTMLDivElement>) {
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     pointerStartRef.current = null;
   }
 
