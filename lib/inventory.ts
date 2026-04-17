@@ -199,6 +199,10 @@ export type ReservationHoldSummary = {
   lastExpiresAt?: number;
 };
 
+const STOREFRONT_RESERVATION_CLEANUP_INTERVAL_MS = 15000;
+let lastStorefrontReservationCleanupAt = 0;
+let storefrontReservationCleanupPromise: Promise<void> | null = null;
+
 function parseNumberResult(value: unknown, fallback = 0) {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
@@ -226,6 +230,31 @@ export function getCheckoutReservationTtlSeconds() {
     return 1800;
   }
   return Math.max(1800, Math.min(86400, Math.floor(configured)));
+}
+
+async function maybeCleanupExpiredReservationsForStorefront() {
+  const now = Date.now();
+  if (now - lastStorefrontReservationCleanupAt < STOREFRONT_RESERVATION_CLEANUP_INTERVAL_MS) {
+    return;
+  }
+
+  if (storefrontReservationCleanupPromise) {
+    await storefrontReservationCleanupPromise;
+    return;
+  }
+
+  storefrontReservationCleanupPromise = (async () => {
+    try {
+      await cleanupExpiredInventoryReservations(25);
+      lastStorefrontReservationCleanupAt = Date.now();
+    } catch (error) {
+      console.error("Storefront reservation cleanup failed", { error });
+    } finally {
+      storefrontReservationCleanupPromise = null;
+    }
+  })();
+
+  await storefrontReservationCleanupPromise;
 }
 
 function getStockTransition(previous: number, next: number): StockTransition | null {
@@ -441,14 +470,17 @@ export async function getAvailableStockForSlugs(slugs: string[]): Promise<Record
     return {};
   }
 
-  const [stockRows, holdSummaries] = await Promise.all([
+  await maybeCleanupExpiredReservationsForStorefront();
+
+  const [stockRows, reservedRows] = await Promise.all([
     Promise.all(uniqueSlugs.map(async (slug) => [slug, await getStock(slug)] as const)),
-    summarizeReservationHoldsForSlugs(uniqueSlugs)
+    Promise.all(uniqueSlugs.map(async (slug) => [slug, await getReservedStock(slug)] as const))
   ]);
+  const reservedBySlug = Object.fromEntries(reservedRows) as Record<string, number>;
 
   return Object.fromEntries(
     stockRows.map(([slug, stock]) => {
-      const reserved = holdSummaries[slug]?.reservedStock || 0;
+      const reserved = reservedBySlug[slug] || 0;
       return [slug, Math.max(0, stock - reserved)] as const;
     })
   );
