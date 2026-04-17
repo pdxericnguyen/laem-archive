@@ -10,6 +10,41 @@ export type OrderShipping = {
   trackingNumber: string;
   trackingUrl: string;
   shippedAt: number;
+  labelUrl?: string | null;
+  labelFormat?: string | null;
+};
+
+export type OrderPrintJob = {
+  status: "queued" | "sent" | "failed" | "disabled";
+  provider: "printnode";
+  externalId: string | null;
+  error: string | null;
+  updatedAt: number;
+};
+
+export type OrderPrinting = {
+  packingSlip?: OrderPrintJob;
+  shippingLabel?: OrderPrintJob;
+};
+
+export type OrderFulfillment = {
+  provider: "easypost";
+  shipmentId: string | null;
+  rateId: string | null;
+  service: string | null;
+  labelUrl: string | null;
+  purchasedAt: number;
+};
+
+export type OrderShippingAddress = {
+  name: string | null;
+  phone: string | null;
+  line1: string;
+  line2: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  country: string | null;
 };
 
 export type OrderConflictResolution = {
@@ -34,7 +69,10 @@ export type OrderRecord = {
   currency: string | null;
   channel?: OrderChannel;
   stripeObjectType?: StripeObjectType;
+  shippingAddress?: OrderShippingAddress;
   shipping?: OrderShipping;
+  printing?: OrderPrinting;
+  fulfillment?: OrderFulfillment;
   conflictResolution?: OrderConflictResolution;
 };
 
@@ -60,6 +98,45 @@ type LooseOrderRecord = {
     trackingNumber?: unknown;
     trackingUrl?: unknown;
     shippedAt?: unknown;
+    labelUrl?: unknown;
+    labelFormat?: unknown;
+  } | null;
+  printing?: {
+    packingSlip?: {
+      status?: unknown;
+      provider?: unknown;
+      externalId?: unknown;
+      jobId?: unknown;
+      error?: unknown;
+      updatedAt?: unknown;
+    } | null;
+    shippingLabel?: {
+      status?: unknown;
+      provider?: unknown;
+      externalId?: unknown;
+      jobId?: unknown;
+      error?: unknown;
+      updatedAt?: unknown;
+    } | null;
+  } | null;
+  fulfillment?: {
+    provider?: unknown;
+    shipmentId?: unknown;
+    rateId?: unknown;
+    service?: unknown;
+    labelUrl?: unknown;
+    purchasedAt?: unknown;
+  } | null;
+  shippingAddress?: {
+    name?: unknown;
+    phone?: unknown;
+    line1?: unknown;
+    line2?: unknown;
+    city?: unknown;
+    state?: unknown;
+    postalCode?: unknown;
+    postal_code?: unknown;
+    country?: unknown;
   } | null;
   conflictResolution?: {
     note?: unknown;
@@ -115,16 +192,119 @@ function normalizeShipping(value: LooseOrderRecord["shipping"]): OrderShipping |
   const trackingNumber = asString(value.trackingNumber);
   const trackingUrl = asString(value.trackingUrl);
   const shippedAt = asNumber(value.shippedAt);
+  const labelUrl = asString(value.labelUrl);
+  const labelFormat = asString(value.labelFormat);
 
   if (!carrier || !trackingNumber || !trackingUrl || shippedAt === null) {
     return undefined;
   }
 
-  return {
+  const normalized: OrderShipping = {
     carrier,
     trackingNumber,
     trackingUrl,
     shippedAt
+  };
+
+  if (labelUrl) {
+    normalized.labelUrl = labelUrl;
+  }
+  if (labelFormat) {
+    normalized.labelFormat = labelFormat;
+  }
+
+  return normalized;
+}
+
+function normalizePrintJob(value: unknown): OrderPrintJob | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+  const row = value as Record<string, unknown>;
+  const statusRaw = asString(row.status);
+  const status =
+    statusRaw === "queued" || statusRaw === "sent" || statusRaw === "failed" || statusRaw === "disabled"
+      ? statusRaw
+      : null;
+  const updatedAt = asNumber(row.updatedAt);
+
+  if (!status || updatedAt === null) {
+    return undefined;
+  }
+
+  return {
+    status,
+    provider: "printnode",
+    externalId: asString(row.externalId) ?? asString(row.jobId),
+    error: asString(row.error),
+    updatedAt
+  };
+}
+
+function normalizePrinting(value: LooseOrderRecord["printing"]): OrderPrinting | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const packingSlip = normalizePrintJob(value.packingSlip);
+  const shippingLabel = normalizePrintJob(value.shippingLabel);
+
+  if (!packingSlip && !shippingLabel) {
+    return undefined;
+  }
+
+  return {
+    packingSlip,
+    shippingLabel
+  };
+}
+
+function normalizeFulfillment(value: LooseOrderRecord["fulfillment"]): OrderFulfillment | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const provider = asString(value.provider);
+  if (provider !== "easypost") {
+    return undefined;
+  }
+
+  const purchasedAt = asNumber(value.purchasedAt);
+  if (purchasedAt === null) {
+    return undefined;
+  }
+
+  return {
+    provider: "easypost",
+    shipmentId: asString(value.shipmentId),
+    rateId: asString(value.rateId),
+    service: asString(value.service),
+    labelUrl: asString(value.labelUrl),
+    purchasedAt
+  };
+}
+
+function normalizeShippingAddress(
+  value: LooseOrderRecord["shippingAddress"]
+): OrderShippingAddress | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const line1 = asString(value.line1);
+  if (!line1) {
+    return undefined;
+  }
+
+  return {
+    name: asString(value.name),
+    phone: asString(value.phone),
+    line1,
+    line2: asString(value.line2),
+    city: asString(value.city),
+    state: asString(value.state),
+    postalCode: asString(value.postalCode) ?? asString(value.postal_code),
+    country: asString(value.country)
   };
 }
 
@@ -210,7 +390,10 @@ export function normalizeOrder(input: unknown): OrderRecord | null {
     currency,
     channel,
     stripeObjectType,
+    shippingAddress: normalizeShippingAddress(raw.shippingAddress),
     shipping: normalizeShipping(raw.shipping),
+    printing: normalizePrinting(raw.printing),
+    fulfillment: normalizeFulfillment(raw.fulfillment),
     conflictResolution: normalizeConflictResolution(raw.conflictResolution)
   };
 }

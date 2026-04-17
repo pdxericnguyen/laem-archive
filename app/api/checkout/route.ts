@@ -22,6 +22,8 @@ type ParsedCheckoutRequest = {
   wantsJson: boolean;
 };
 
+type ShippingAllowedCountry = Stripe.Checkout.SessionCreateParams.ShippingAddressCollection.AllowedCountry;
+
 function normalizeSiteUrl(url: string) {
   return url.replace(/\/+$/, "");
 }
@@ -32,6 +34,19 @@ function asPositiveInt(value: string | undefined, fallback: number) {
     return fallback;
   }
   return Math.max(1, Math.floor(parsed));
+}
+
+function getShippingAddressAllowedCountries() {
+  const configured = (process.env.STRIPE_SHIPPING_ALLOWED_COUNTRIES || "US")
+    .split(",")
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+
+  if (configured.length === 0) {
+    return ["US" as ShippingAllowedCountry];
+  }
+
+  return [...new Set(configured)] as ShippingAllowedCountry[];
 }
 
 function normalizeItem(rawSlug: unknown, rawQuantity: unknown): CheckoutItem | null {
@@ -228,6 +243,10 @@ export async function POST(request: Request) {
       success_url: successUrl,
       cancel_url: cancelUrl,
       expires_at: expiresAt,
+      billing_address_collection: "required",
+      shipping_address_collection: {
+        allowed_countries: getShippingAddressAllowedCountries()
+      },
       line_items: lineItems,
       metadata: {
         cart: serializeCartMetadata(items),

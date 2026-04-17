@@ -6,6 +6,7 @@ type OrderStatus = "paid" | "shipped" | "stock_conflict" | string;
 
 type OrderRow = {
   id: string;
+  channel?: "checkout" | "terminal" | string;
   slug?: string | null;
   items?: Array<{ slug?: string; quantity?: number }>;
   email?: string | null;
@@ -15,11 +16,41 @@ type OrderRow = {
   currency?: string | null;
   status?: OrderStatus;
   stripe_dashboard_url?: string;
+  shippingAddress?: {
+    name?: string | null;
+    phone?: string | null;
+    line1?: string | null;
+    line2?: string | null;
+    city?: string | null;
+    state?: string | null;
+    postalCode?: string | null;
+    country?: string | null;
+  };
   shipping?: {
     carrier: string;
     trackingNumber: string;
     trackingUrl: string;
     shippedAt?: number;
+    labelUrl?: string | null;
+    labelFormat?: string | null;
+  };
+  printing?: {
+    packingSlip?: {
+      status?: "queued" | "sent" | "failed" | "disabled";
+      externalId?: string | null;
+      error?: string | null;
+      updatedAt?: number;
+    };
+    shippingLabel?: {
+      status?: "queued" | "sent" | "failed" | "disabled";
+      externalId?: string | null;
+      error?: string | null;
+      updatedAt?: number;
+    };
+  };
+  fulfillment?: {
+    provider?: "easypost" | string;
+    service?: string | null;
   };
   conflictResolution?: {
     note?: string;
@@ -84,6 +115,25 @@ function toStatusLabel(status?: OrderStatus) {
     return "Stock Conflict";
   }
   return "Paid";
+}
+
+function formatAddress(row: OrderRow) {
+  const address = row.shippingAddress;
+  if (!address?.line1) {
+    return null;
+  }
+
+  const locality = [address.city, address.state, address.postalCode].filter(Boolean).join(", ");
+  const lines = [
+    address.name || null,
+    address.line1,
+    address.line2 || null,
+    locality || null,
+    address.country || null,
+    address.phone ? `Phone: ${address.phone}` : null
+  ].filter(Boolean);
+
+  return lines.join("\n");
 }
 
 export default function OrdersClient() {
@@ -308,10 +358,16 @@ function OrderCard({
   onResolved: (message: string) => Promise<void>;
 }) {
   const [sending, setSending] = useState(false);
+  const [syncingShipping, setSyncingShipping] = useState(false);
+  const [autoFulfilling, setAutoFulfilling] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [resolveNote, setResolveNote] = useState("Refund handled in Stripe");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const shipToAddress = formatAddress(row);
+  const requiresShippingAddress = row.channel !== "terminal";
+  const canAutoFulfill = row.channel !== "terminal";
+  const missingShippingAddress = requiresShippingAddress && !shipToAddress;
 
   async function markShipped(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -382,6 +438,68 @@ function OrderCard({
     }
   }
 
+  async function syncShippingAddress() {
+    setSyncingShipping(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch("/api/admin/orders/sync-shipping", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          orderId: row.id
+        })
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.ok) {
+        setError(data?.error || "Unable to sync shipping address.");
+        return;
+      }
+
+      const msg = data?.already
+        ? "Shipping address already up to date."
+        : "Shipping address synced from Stripe.";
+      setSuccess(msg);
+      await onShipped(msg);
+    } catch {
+      setError("Unable to sync shipping address.");
+    } finally {
+      setSyncingShipping(false);
+    }
+  }
+
+  async function autoFulfillOrder() {
+    setAutoFulfilling(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch("/api/admin/orders/fulfill-auto", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          orderId: row.id
+        })
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.ok) {
+        setError(data?.error || "Auto fulfillment failed.");
+        return;
+      }
+
+      const msg = data?.already ? "Order was already shipped." : "Label purchased and fulfillment completed.";
+      setSuccess(msg);
+      await onShipped(msg);
+    } catch {
+      setError("Auto fulfillment failed.");
+    } finally {
+      setAutoFulfilling(false);
+    }
+  }
+
   return (
     <div className="border border-neutral-200 p-4 space-y-3">
       <div className="flex items-start justify-between gap-4">
@@ -407,6 +525,13 @@ function OrderCard({
         </a>
       ) : null}
 
+      {shipToAddress ? (
+        <div className="text-sm text-neutral-700">
+          <div className="text-xs uppercase tracking-[0.12em] text-neutral-600">Ship To</div>
+          <div className="mt-1 whitespace-pre-line">{shipToAddress}</div>
+        </div>
+      ) : null}
+
       {row.status === "shipped" && row.shipping ? (
         <div className="text-sm text-neutral-700">
           <div className="text-xs uppercase tracking-[0.12em] text-neutral-600">Shipping</div>
@@ -420,7 +545,33 @@ function OrderCard({
             >
               {row.shipping.trackingNumber}
             </a>
+            {row.shipping.labelUrl ? (
+              <>
+                {" "}
+                |{" "}
+                <a
+                  className="underline"
+                  href={row.shipping.labelUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Label PDF
+                </a>
+              </>
+            ) : null}
           </div>
+          {row.printing?.shippingLabel?.status ? (
+            <div className="mt-1 text-xs text-neutral-600">
+              Label print: {row.printing.shippingLabel.status}
+              {row.printing.shippingLabel.error ? ` (${row.printing.shippingLabel.error})` : ""}
+            </div>
+          ) : null}
+          {row.fulfillment?.provider ? (
+            <div className="mt-1 text-xs text-neutral-600">
+              Fulfillment provider: {row.fulfillment.provider}
+              {row.fulfillment.service ? ` (${row.fulfillment.service})` : ""}
+            </div>
+          ) : null}
         </div>
       ) : null}
 
@@ -457,34 +608,60 @@ function OrderCard({
       ) : null}
 
       {row.status === "paid" ? (
-        <form onSubmit={markShipped} className="grid gap-2 md:grid-cols-4">
-          <input
-            name="carrier"
-            placeholder="Carrier"
-            className="h-10 border border-neutral-300 px-3 text-sm"
-            required
-          />
-          <input
-            name="trackingNumber"
-            placeholder="Tracking #"
-            className="h-10 border border-neutral-300 px-3 text-sm"
-            required
-          />
-          <input
-            name="trackingUrl"
-            placeholder="Tracking URL"
-            className="h-10 border border-neutral-300 px-3 text-sm md:col-span-2"
-            required
-          />
-          <button
-            disabled={sending}
-            className="h-10 border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 md:col-span-4 disabled:opacity-50"
-          >
-            {sending ? "Sending..." : "Mark shipped + email"}
-          </button>
-          {success ? <p className="text-xs text-green-700 md:col-span-4">{success}</p> : null}
-          {error ? <p className="text-xs text-red-600 md:col-span-4">{error}</p> : null}
-        </form>
+        <div className="space-y-2">
+          {canAutoFulfill ? (
+            <button
+              type="button"
+              disabled={autoFulfilling || missingShippingAddress}
+              onClick={autoFulfillOrder}
+              className="h-10 w-full border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 disabled:opacity-50"
+            >
+              {autoFulfilling ? "Buying label..." : "Auto Fulfill (buy label + print)"}
+            </button>
+          ) : null}
+
+          {missingShippingAddress ? (
+            <div className="border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
+              <p>Missing shipping address for this checkout order.</p>
+              <button
+                type="button"
+                onClick={syncShippingAddress}
+                disabled={syncingShipping}
+                className="mt-2 h-8 border border-amber-300 px-3 text-[11px] font-semibold uppercase tracking-[0.12em] hover:bg-amber-100 disabled:opacity-50"
+              >
+                {syncingShipping ? "Syncing..." : "Sync Address from Stripe"}
+              </button>
+            </div>
+          ) : null}
+
+          <form onSubmit={markShipped} className="grid gap-2 md:grid-cols-4">
+            <input
+              name="carrier"
+              placeholder="Carrier"
+              className="h-10 border border-neutral-300 px-3 text-sm"
+              required
+            />
+            <input
+              name="trackingNumber"
+              placeholder="Tracking #"
+              className="h-10 border border-neutral-300 px-3 text-sm"
+              required
+            />
+            <input
+              name="trackingUrl"
+              placeholder="Tracking URL (optional)"
+              className="h-10 border border-neutral-300 px-3 text-sm md:col-span-2"
+            />
+            <button
+              disabled={sending || missingShippingAddress}
+              className="h-10 border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 md:col-span-4 disabled:opacity-50"
+            >
+              {sending ? "Sending..." : "Mark shipped + email"}
+            </button>
+            {success ? <p className="text-xs text-green-700 md:col-span-4">{success}</p> : null}
+            {error ? <p className="text-xs text-red-600 md:col-span-4">{error}</p> : null}
+          </form>
+        </div>
       ) : null}
     </div>
   );

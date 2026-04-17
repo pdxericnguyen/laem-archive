@@ -3,13 +3,18 @@ import { NextResponse } from "next/server";
 import { sendShippedEmail } from "@/lib/email";
 import { readOrder, writeOrder } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
+import { defaultTrackingUrl, normalizeHttpUrl } from "@/lib/tracking";
 
 type ShippingPayload = {
   orderId: string;
   carrier: string;
   trackingNumber: string;
-  trackingUrl: string;
+  trackingUrl?: string;
 };
+
+function asString(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
 
 async function getPayload(request: Request): Promise<ShippingPayload | null> {
   const contentType = request.headers.get("content-type") || "";
@@ -22,14 +27,13 @@ async function getPayload(request: Request): Promise<ShippingPayload | null> {
     if (
       typeof orderId === "string" &&
       typeof carrier === "string" &&
-      typeof trackingNumber === "string" &&
-      typeof trackingUrl === "string"
+      typeof trackingNumber === "string"
     ) {
       return {
-        orderId,
-        carrier,
-        trackingNumber,
-        trackingUrl
+        orderId: asString(orderId),
+        carrier: asString(carrier),
+        trackingNumber: asString(trackingNumber),
+        trackingUrl: asString(trackingUrl)
       };
     }
     return null;
@@ -43,14 +47,13 @@ async function getPayload(request: Request): Promise<ShippingPayload | null> {
   if (
     typeof orderId === "string" &&
     typeof carrier === "string" &&
-    typeof trackingNumber === "string" &&
-    typeof trackingUrl === "string"
+    typeof trackingNumber === "string"
   ) {
     return {
-      orderId,
-      carrier,
-      trackingNumber,
-      trackingUrl
+      orderId: asString(orderId),
+      carrier: asString(carrier),
+      trackingNumber: asString(trackingNumber),
+      trackingUrl: asString(trackingUrl)
     };
   }
   return null;
@@ -66,6 +69,12 @@ export async function POST(request: Request) {
   const payload = await getPayload(request);
   if (!payload) {
     return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
+  }
+  if (!payload.orderId || !payload.carrier || !payload.trackingNumber) {
+    return NextResponse.json(
+      { ok: false, error: "Order, carrier, and tracking number are required." },
+      { status: 400 }
+    );
   }
 
   const order = await readOrder(payload.orderId);
@@ -87,9 +96,19 @@ export async function POST(request: Request) {
     );
   }
 
+  if (order.channel !== "terminal" && !order.shippingAddress?.line1) {
+    return NextResponse.json(
+      { ok: false, error: "Missing shipping address. Sync from Stripe before marking shipped." },
+      { status: 409 }
+    );
+  }
+
   if (order.status === "shipped") {
     return NextResponse.json({ ok: true, already: true });
   }
+
+  const trackingUrl =
+    normalizeHttpUrl(payload.trackingUrl || "") || defaultTrackingUrl(payload.carrier, payload.trackingNumber);
 
   const updatedOrder = {
     ...order,
@@ -97,7 +116,7 @@ export async function POST(request: Request) {
     shipping: {
       carrier: payload.carrier,
       trackingNumber: payload.trackingNumber,
-      trackingUrl: payload.trackingUrl,
+      trackingUrl,
       shippedAt: Math.floor(Date.now() / 1000)
     }
   };
@@ -111,9 +130,9 @@ export async function POST(request: Request) {
       customerEmail: email,
       carrier: payload.carrier,
       trackingNumber: payload.trackingNumber,
-      trackingUrl: payload.trackingUrl
+      trackingUrl
     });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, trackingUrl });
 }

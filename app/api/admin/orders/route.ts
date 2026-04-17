@@ -1,13 +1,20 @@
 import { NextResponse } from "next/server";
 
 import { listOrdersPage } from "@/lib/orders";
-import type { OrderStatusFilter } from "@/lib/orders";
+import type { OrderStatusFilter, StripeObjectType } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 
-function getStripeDashboardUrl(sessionId: string, secretKey: string | undefined) {
+function getStripeDashboardUrl(
+  objectId: string,
+  stripeObjectType: StripeObjectType | undefined,
+  secretKey: string | undefined
+) {
   const isTest = Boolean(secretKey && secretKey.startsWith("sk_test_"));
   const base = isTest ? "https://dashboard.stripe.com/test" : "https://dashboard.stripe.com";
-  return `${base}/checkout/sessions/${sessionId}`;
+  if (stripeObjectType === "payment_intent" || objectId.startsWith("pi_")) {
+    return `${base}/payments/${objectId}`;
+  }
+  return `${base}/checkout/sessions/${objectId}`;
 }
 
 export async function GET(req: Request) {
@@ -56,7 +63,7 @@ export async function GET(req: Request) {
     ...row,
     customer_email: row.email,
     payment_status: row.status,
-    stripe_dashboard_url: getStripeDashboardUrl(row.id, secretKey)
+    stripe_dashboard_url: getStripeDashboardUrl(row.id, row.stripeObjectType, secretKey)
   }));
 
   return NextResponse.json({

@@ -8,8 +8,18 @@ import {
   syncProductStockAndArchiveState,
   type StockRequest
 } from "@/lib/inventory";
-import { appendOrderToIndex, hasOrder, writeOrder, type OrderChannel, type StripeObjectType } from "@/lib/orders";
+import {
+  appendOrderToIndex,
+  hasOrder,
+  writeOrder,
+  type OrderPrintJob,
+  type OrderChannel,
+  type OrderShippingAddress,
+  type StripeObjectType
+} from "@/lib/orders";
 import { sendInventoryAlertEmail, sendOrderReceivedEmail } from "@/lib/email";
+import { buildPackingSlipPdfBase64 } from "@/lib/packing-slip-pdf";
+import { createPrintNodeJob, getPrintNodePrinterId } from "@/lib/printnode";
 
 export const runtime = "nodejs";
 
@@ -104,7 +114,108 @@ type FinalizeOrderParams = {
   currency: string | null;
   channel: OrderChannel;
   stripeObjectType: StripeObjectType;
+  shippingAddress?: OrderShippingAddress;
 };
+
+function normalizeStripeShippingAddress(
+  details: Stripe.Checkout.Session.ShippingDetails | null | undefined
+): OrderShippingAddress | undefined {
+  const address = details?.address;
+  if (!address?.line1) {
+    return undefined;
+  }
+
+  return {
+    name: details?.name ?? null,
+    phone: details?.phone ?? null,
+    line1: address.line1,
+    line2: address.line2 ?? null,
+    city: address.city ?? null,
+    state: address.state ?? null,
+    postalCode: address.postal_code ?? null,
+    country: address.country ?? null
+  };
+}
+
+function getCheckoutShippingDetails(session: Stripe.Checkout.Session) {
+  const withCollectedInformation = session as Stripe.Checkout.Session & {
+    collected_information?: {
+      shipping_details?: Stripe.Checkout.Session.ShippingDetails | null;
+    };
+  };
+
+  return session.shipping_details || withCollectedInformation.collected_information?.shipping_details;
+}
+
+async function resolveCheckoutShippingAddress(stripe: Stripe, session: Stripe.Checkout.Session) {
+  const direct = normalizeStripeShippingAddress(getCheckoutShippingDetails(session));
+  if (direct) {
+    return direct;
+  }
+
+  try {
+    const refreshed = await stripe.checkout.sessions.retrieve(session.id);
+    return normalizeStripeShippingAddress(getCheckoutShippingDetails(refreshed));
+  } catch (error) {
+    console.error("Unable to refresh checkout session shipping details", {
+      sessionId: session.id,
+      error
+    });
+  }
+
+  return undefined;
+}
+
+async function maybeAutoPrintPackingSlip(
+  order: Parameters<typeof writeOrder>[0]
+): Promise<OrderPrintJob | undefined> {
+  if (order.channel !== "checkout") {
+    return undefined;
+  }
+
+  if (String(process.env.AUTO_PRINT_PACKING_SLIP || "false").toLowerCase() !== "true") {
+    return undefined;
+  }
+
+  const printerId = getPrintNodePrinterId("PRINTNODE_SLIP_PRINTER_ID");
+  if (!printerId) {
+    return {
+      status: "disabled",
+      provider: "printnode",
+      externalId: null,
+      error: "Missing PRINTNODE_SLIP_PRINTER_ID.",
+      updatedAt: Math.floor(Date.now() / 1000)
+    };
+  }
+
+  const content = buildPackingSlipPdfBase64(order);
+  const printResult = await createPrintNodeJob({
+    printerId,
+    title: `Packing Slip ${order.id}`,
+    source: "LAEM Archive Fulfillment",
+    contentType: "pdf_base64",
+    content
+  });
+
+  if (!printResult.ok) {
+    const printError = "error" in printResult ? printResult.error : "PrintNode print failed.";
+    return {
+      status: "failed",
+      provider: "printnode",
+      externalId: null,
+      error: printError,
+      updatedAt: Math.floor(Date.now() / 1000)
+    };
+  }
+
+  return {
+    status: "sent",
+    provider: "printnode",
+    externalId: printResult.jobId,
+    error: null,
+    updatedAt: Math.floor(Date.now() / 1000)
+  };
+}
 
 async function finalizeSuccessfulOrder(params: FinalizeOrderParams) {
   const orderExists = await hasOrder(params.id);
@@ -133,7 +244,8 @@ async function finalizeSuccessfulOrder(params: FinalizeOrderParams) {
       amount_total: params.amountTotal,
       currency: params.currency,
       channel: params.channel,
-      stripeObjectType: params.stripeObjectType
+      stripeObjectType: params.stripeObjectType,
+      shippingAddress: params.shippingAddress
     };
 
     await writeOrder(conflictOrder);
@@ -171,7 +283,7 @@ async function finalizeSuccessfulOrder(params: FinalizeOrderParams) {
     await syncProductStockAndArchiveState(item.slug, item.next);
   }
 
-  const orderRecord = {
+  let orderRecord: Parameters<typeof writeOrder>[0] = {
     id: params.id,
     slug: primarySlug,
     email: params.email,
@@ -182,11 +294,24 @@ async function finalizeSuccessfulOrder(params: FinalizeOrderParams) {
     amount_total: params.amountTotal,
     currency: params.currency,
     channel: params.channel,
-    stripeObjectType: params.stripeObjectType
+    stripeObjectType: params.stripeObjectType,
+    shippingAddress: params.shippingAddress
   };
 
   await writeOrder(orderRecord);
   await appendOrderToIndex(params.id);
+
+  const packingSlipPrint = await maybeAutoPrintPackingSlip(orderRecord);
+  if (packingSlipPrint) {
+    orderRecord = {
+      ...orderRecord,
+      printing: {
+        ...(orderRecord.printing || {}),
+        packingSlip: packingSlipPrint
+      }
+    };
+    await writeOrder(orderRecord);
+  }
 
   for (const item of stockResult.items) {
     if (!item.transition) {
@@ -327,6 +452,13 @@ export async function POST(request: Request) {
     return new Response("Missing cart metadata", { status: 400 });
   }
 
+  const shippingAddress = await resolveCheckoutShippingAddress(stripe, session);
+  if (!shippingAddress) {
+    console.warn("Checkout session missing shipping address during fulfillment", {
+      sessionId: session.id
+    });
+  }
+
   const outcome = await finalizeSuccessfulOrder({
     id: session.id,
     items: purchasedItems,
@@ -335,7 +467,8 @@ export async function POST(request: Request) {
     amountTotal: session.amount_total ?? null,
     currency: session.currency ?? null,
     channel: "checkout",
-    stripeObjectType: "checkout_session"
+    stripeObjectType: "checkout_session",
+    shippingAddress
   });
 
   if (outcome === "duplicate") {
