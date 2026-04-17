@@ -302,7 +302,8 @@ export default function ProductGallery({ title, images }: Props) {
           overflow-y: hidden;
           scrollbar-width: none;
           scroll-snap-type: x mandatory;
-          touch-action: pan-y pinch-zoom;
+          touch-action: pan-x pan-y pinch-zoom;
+          -webkit-overflow-scrolling: touch;
         }
 
         .gallery-scroll::-webkit-scrollbar {
