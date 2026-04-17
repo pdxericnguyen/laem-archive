@@ -1,8 +1,10 @@
+import AdminVisualBulkActions from "./bulk-actions";
 import ImageUploadField from "@/app/admin/products/image-upload-field";
 import { hasKvEnv } from "@/lib/kv";
 import {
   getSiteVisualsForAdmin,
   SITE_VISUAL_PLACEMENTS,
+  type SiteVisual,
   type SiteVisualPlacement
 } from "@/lib/site-visuals";
 
@@ -16,6 +18,18 @@ type AdminVisualsPageProps = {
     visualError?: string;
     placement?: string;
   };
+};
+
+type VisualPayload = {
+  placement: SiteVisualPlacement;
+  imageUrl: string;
+  altText: string;
+  eyebrow: string;
+  headline: string;
+  body: string;
+  linkHref: string;
+  linkLabel: string;
+  published: boolean;
 };
 
 function getMessage(searchParams: AdminVisualsPageProps["searchParams"]) {
@@ -52,6 +66,20 @@ function formatUpdatedAt(value: number | undefined) {
   }).format(new Date(value));
 }
 
+function buildInitialPayload(placement: SiteVisualPlacement, visual: SiteVisual | null): VisualPayload {
+  return {
+    placement,
+    imageUrl: visual?.imageUrl || "",
+    altText: visual?.altText || "",
+    eyebrow: visual?.eyebrow || "",
+    headline: visual?.headline || "",
+    body: visual?.body || "",
+    linkHref: visual?.linkHref || "",
+    linkLabel: visual?.linkLabel || "",
+    published: Boolean(visual?.published)
+  };
+}
+
 export default async function AdminVisualsPage({ searchParams }: AdminVisualsPageProps) {
   if (!hasKvEnv()) {
     return (
@@ -64,6 +92,12 @@ export default async function AdminVisualsPage({ searchParams }: AdminVisualsPag
 
   const visualsByPlacement = await getSiteVisualsForAdmin();
   const message = getMessage(searchParams);
+  const initialPayloads = Object.fromEntries(
+    SITE_VISUAL_PLACEMENTS.map((definition) => [
+      definition.placement,
+      buildInitialPayload(definition.placement, visualsByPlacement[definition.placement as SiteVisualPlacement])
+    ])
+  ) as Record<SiteVisualPlacement, VisualPayload>;
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10 space-y-8">
@@ -90,6 +124,11 @@ export default async function AdminVisualsPage({ searchParams }: AdminVisualsPag
           {message.text}
         </div>
       ) : null}
+
+      <AdminVisualBulkActions
+        placements={SITE_VISUAL_PLACEMENTS.map((definition) => definition.placement)}
+        initialPayloads={initialPayloads}
+      />
 
       <section className="grid gap-6">
         {SITE_VISUAL_PLACEMENTS.map((definition) => {
@@ -121,7 +160,12 @@ export default async function AdminVisualsPage({ searchParams }: AdminVisualsPag
                 </div>
               </div>
 
-              <form action="/api/admin/visuals/save" method="POST" className="grid gap-4 text-sm">
+              <form
+                action="/api/admin/visuals/save"
+                method="POST"
+                className="grid gap-4 text-sm"
+                data-visual-save-form={definition.placement}
+              >
                 <input type="hidden" name="placement" value={definition.placement} />
 
                 <ImageUploadField

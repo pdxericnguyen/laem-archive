@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 
 type Props = {
   name: string;
@@ -36,6 +36,13 @@ function firstLine(value: string) {
   );
 }
 
+function isLikelyImageFile(file: File) {
+  if (file.type.startsWith("image/")) {
+    return true;
+  }
+  return /\.(avif|gif|heic|heif|jpe?g|png|svg|webp)$/i.test(file.name);
+}
+
 export default function ImageUploadField({
   name,
   defaultValue = "",
@@ -51,9 +58,11 @@ export default function ImageUploadField({
   const [value, setValue] = useState(allowMultiple ? defaultValue : firstLine(defaultValue));
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [isDropActive, setIsDropActive] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const dropDepthRef = useRef(0);
 
   const imageUrls = useMemo(
     () =>
@@ -135,6 +144,60 @@ export default function ImageUploadField({
     event.currentTarget.value = "";
   }
 
+  function hasFileTransfer(event: DragEvent<HTMLElement>) {
+    return Array.from(event.dataTransfer.types || []).includes("Files");
+  }
+
+  function handleDragEnter(event: DragEvent<HTMLElement>) {
+    if (uploading || !hasFileTransfer(event)) {
+      return;
+    }
+    event.preventDefault();
+    dropDepthRef.current += 1;
+    setIsDropActive(true);
+  }
+
+  function handleDragOver(event: DragEvent<HTMLElement>) {
+    if (uploading || !hasFileTransfer(event)) {
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  }
+
+  function handleDragLeave(event: DragEvent<HTMLElement>) {
+    if (uploading || !hasFileTransfer(event)) {
+      return;
+    }
+    event.preventDefault();
+    dropDepthRef.current = Math.max(0, dropDepthRef.current - 1);
+    if (dropDepthRef.current === 0) {
+      setIsDropActive(false);
+    }
+  }
+
+  function handleDrop(event: DragEvent<HTMLElement>) {
+    if (uploading || !hasFileTransfer(event)) {
+      return;
+    }
+    event.preventDefault();
+    dropDepthRef.current = 0;
+    setIsDropActive(false);
+
+    const droppedFiles = Array.from(event.dataTransfer.files || []);
+    const imageFiles = droppedFiles.filter((file) => isLikelyImageFile(file));
+    if (imageFiles.length === 0) {
+      setError("Drop image files only.");
+      setMessage(null);
+      return;
+    }
+
+    const filesToUpload = allowMultiple ? imageFiles : imageFiles.slice(0, 1);
+    uploadFiles(filesToUpload).catch(() => {
+      // handled by uploadFiles
+    });
+  }
+
   const selectedImageUrl = imageUrls[selectedIndex] || "";
   const normalizedValue = allowMultiple ? value : firstLine(value);
 
@@ -145,11 +208,19 @@ export default function ImageUploadField({
       </span>
 
       <div className="grid gap-3 lg:grid-cols-[320px_1fr]">
-        <div className="space-y-2">
+        <div
+          className="space-y-2"
+          onDragEnter={handleDragEnter}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
           <button
             type="button"
             onClick={openPicker}
-            className={`group relative block w-full overflow-hidden border border-neutral-300 bg-neutral-50 hover:bg-neutral-100 ${aspectClassName}`}
+            className={`group relative block w-full overflow-hidden border bg-neutral-50 hover:bg-neutral-100 ${
+              isDropActive ? "border-neutral-800 ring-1 ring-neutral-300" : "border-neutral-300"
+            } ${aspectClassName}`}
           >
             {selectedImageUrl ? (
               <img
@@ -162,6 +233,11 @@ export default function ImageUploadField({
                 {uploading ? "Uploading..." : emptyLabel}
               </div>
             )}
+            {isDropActive ? (
+              <div className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center bg-white/85 px-4 text-center text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-800">
+                Drop image to upload
+              </div>
+            ) : null}
             <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-white/90 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-700">
               {uploading ? "Uploading..." : selectedImageUrl ? "Replace / Add Image" : "Add First Image"}
             </div>
