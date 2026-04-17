@@ -8,6 +8,7 @@ type Props = {
 };
 
 type GalleryDirection = "previous" | "next";
+type GalleryTransition = GalleryDirection | "wrap";
 
 function normalizeImages(images: string[]) {
   return images.map((item) => item.trim()).filter(Boolean);
@@ -15,13 +16,18 @@ function normalizeImages(images: string[]) {
 
 export default function ProductGallery({ title, images }: Props) {
   const gallery = useMemo(() => normalizeImages(images), [images]);
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [transitionDirection, setTransitionDirection] = useState<GalleryDirection>("next");
+  const [galleryState, setGalleryState] = useState<{
+    activeIndex: number;
+    transition: GalleryTransition;
+  }>({
+    activeIndex: 0,
+    transition: "next"
+  });
   const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const hasImages = gallery.length > 0;
-  const safeIndex = hasImages ? Math.min(activeIndex, gallery.length - 1) : 0;
+  const safeIndex = hasImages ? Math.min(galleryState.activeIndex, gallery.length - 1) : 0;
   const activeImage = hasImages ? gallery[safeIndex] : "";
 
   useEffect(() => {
@@ -44,18 +50,26 @@ export default function ProductGallery({ title, images }: Props) {
       return;
     }
 
-    setTransitionDirection(direction);
-    setActiveIndex((value) => {
-      const currentIndex = Math.min(gallery.length - 1, Math.max(0, value));
+    setGalleryState((value) => {
+      const currentIndex = Math.min(gallery.length - 1, Math.max(0, value.activeIndex));
       const step = direction === "next" ? 1 : -1;
       const nextIndex = currentIndex + step;
       if (nextIndex < 0) {
-        return gallery.length - 1;
+        return {
+          activeIndex: gallery.length - 1,
+          transition: "wrap"
+        };
       }
       if (nextIndex >= gallery.length) {
-        return 0;
+        return {
+          activeIndex: 0,
+          transition: "wrap"
+        };
       }
-      return nextIndex;
+      return {
+        activeIndex: nextIndex,
+        transition: direction
+      };
     });
   }
 
@@ -65,6 +79,18 @@ export default function ProductGallery({ title, images }: Props) {
 
   function next() {
     move("next");
+  }
+
+  function setActiveThumb(index: number) {
+    setGalleryState((current) => {
+      if (index === current.activeIndex) {
+        return current;
+      }
+      return {
+        activeIndex: index,
+        transition: index > current.activeIndex ? "next" : "previous"
+      };
+    });
   }
 
   function handlePointerDown(event: PointerEvent<HTMLDivElement>) {
@@ -145,10 +171,10 @@ export default function ProductGallery({ title, images }: Props) {
       >
         {activeImage ? (
           <img
-            key={`${activeImage}-${transitionDirection}`}
+            key={`${activeImage}-${galleryState.transition}`}
             src={activeImage}
             alt={`${title} image ${safeIndex + 1}`}
-            className={`h-full w-full object-cover select-none gallery-image-${transitionDirection}`}
+            className={`h-full w-full object-cover select-none gallery-image-${galleryState.transition}`}
             loading="lazy"
             draggable={false}
           />
@@ -196,7 +222,7 @@ export default function ProductGallery({ title, images }: Props) {
               className={`relative h-20 w-16 shrink-0 overflow-hidden border ${
                 index === safeIndex ? "border-neutral-700" : "border-neutral-300"
               }`}
-              onClick={() => setActiveIndex(index)}
+              onClick={() => setActiveThumb(index)}
               aria-label={`Show image ${index + 1}`}
             >
               <img
@@ -217,6 +243,10 @@ export default function ProductGallery({ title, images }: Props) {
 
         .gallery-image-previous {
           animation: gallery-slide-previous 220ms ease-out;
+        }
+
+        .gallery-image-wrap {
+          animation: gallery-fade-wrap 220ms ease-out;
         }
 
         @keyframes gallery-slide-next {
@@ -240,6 +270,16 @@ export default function ProductGallery({ title, images }: Props) {
           to {
             opacity: 1;
             transform: translateX(0);
+          }
+        }
+
+        @keyframes gallery-fade-wrap {
+          from {
+            opacity: 0.72;
+          }
+
+          to {
+            opacity: 1;
           }
         }
       `}</style>
