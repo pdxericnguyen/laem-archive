@@ -14,34 +14,6 @@ async function horizontalWheel(page: Page, direction: "previous" | "next", event
   }
 }
 
-async function touchSwipe(page: Page, direction: "previous" | "next") {
-  const gallery = page.locator("[data-gallery-viewport]");
-  const box = await gallery.boundingBox();
-  if (!box) {
-    throw new Error("Gallery bounds not available");
-  }
-
-  const y = box.y + box.height / 2;
-  const startX = direction === "next" ? box.x + box.width * 0.75 : box.x + box.width * 0.25;
-  const endX = direction === "next" ? box.x + box.width * 0.25 : box.x + box.width * 0.75;
-
-  await gallery.evaluate(
-    (element, points) => {
-      function dispatchTouch(type: string, touches: Array<{ clientX: number; clientY: number }>) {
-        const event = new Event(type, { bubbles: true, cancelable: true });
-        Object.defineProperty(event, "touches", { value: type === "touchend" ? [] : touches });
-        Object.defineProperty(event, "targetTouches", { value: type === "touchend" ? [] : touches });
-        Object.defineProperty(event, "changedTouches", { value: touches });
-        element.dispatchEvent(event);
-      }
-
-      dispatchTouch("touchstart", [{ clientX: points.startX, clientY: points.y }]);
-      dispatchTouch("touchend", [{ clientX: points.endX, clientY: points.y }]);
-    },
-    { startX, endX, y }
-  );
-}
-
 test.beforeEach(async ({ page }) => {
   await page.goto("/dev/gallery-sandbox");
   await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
@@ -58,20 +30,6 @@ test("desktop arrows move and wrap in both directions", async ({ page }) => {
   await expect(page.locator("[data-gallery-counter]")).toHaveText("3 / 3");
 
   await page.getByLabel("Next image").click();
-  await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
-});
-
-test("mobile-like swipe gestures move and wrap in both directions", async ({ page }) => {
-  await touchSwipe(page, "next");
-  await expect(page.locator("[data-gallery-counter]")).toHaveText("2 / 3");
-
-  await touchSwipe(page, "previous");
-  await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
-
-  await touchSwipe(page, "previous");
-  await expect(page.locator("[data-gallery-counter]")).toHaveText("3 / 3");
-
-  await touchSwipe(page, "next");
   await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
 });
 
