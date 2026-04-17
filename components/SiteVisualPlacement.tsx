@@ -21,7 +21,8 @@ export default function SiteVisualPlacement({ visual, variant = "inline", classN
     return null;
   }
 
-  const hasCopy = Boolean(visual.eyebrow || visual.headline || visual.body || visual.linkLabel);
+  const hasCta = Boolean(visual.linkLabel && visual.linkHref);
+  const hasCopy = Boolean(visual.eyebrow || visual.headline || visual.body || hasCta);
   const card = (
     <div className={`group relative overflow-hidden border border-neutral-200 bg-neutral-100 ${getAspectClass(variant)} ${className}`}>
       <img
@@ -39,7 +40,7 @@ export default function SiteVisualPlacement({ visual, variant = "inline", classN
             <h2 className="mt-1 text-base font-semibold tracking-tight md:text-lg">{visual.headline}</h2>
           ) : null}
           {visual.body ? <p className="mt-2 text-xs leading-relaxed text-neutral-700 md:text-sm">{visual.body}</p> : null}
-          {visual.linkLabel && visual.linkHref ? (
+          {hasCta ? (
             <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-800">
               {visual.linkLabel}
             </p>

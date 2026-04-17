@@ -27,6 +27,15 @@ function appendLines(base: string, lines: string[]) {
   return `${normalized}\n${next}`;
 }
 
+function firstLine(value: string) {
+  return (
+    value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)[0] || ""
+  );
+}
+
 export default function ImageUploadField({
   name,
   defaultValue = "",
@@ -39,7 +48,7 @@ export default function ImageUploadField({
   allowMultiple = true,
   aspectClassName = "aspect-[4/5]"
 }: Props) {
-  const [value, setValue] = useState(defaultValue);
+  const [value, setValue] = useState(allowMultiple ? defaultValue : firstLine(defaultValue));
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -127,6 +136,7 @@ export default function ImageUploadField({
   }
 
   const selectedImageUrl = imageUrls[selectedIndex] || "";
+  const normalizedValue = allowMultiple ? value : firstLine(value);
 
   return (
     <div className="grid gap-2">
@@ -187,8 +197,8 @@ export default function ImageUploadField({
             name={name}
             rows={allowMultiple ? 6 : 3}
             className="border border-neutral-300 p-3"
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
+            value={normalizedValue}
+            onChange={(event) => setValue(allowMultiple ? event.target.value : firstLine(event.target.value))}
             placeholder={placeholder}
           />
           <p className="text-[11px] text-neutral-500">
