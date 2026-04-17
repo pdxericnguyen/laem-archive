@@ -1,6 +1,6 @@
 "use client";
 
-import { type KeyboardEvent, type UIEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   title: string;
@@ -8,21 +8,8 @@ type Props = {
 };
 
 type GalleryDirection = "previous" | "next";
-type WheelGestureState = {
-  accumulatedDelta: number;
-  direction: GalleryDirection;
-  lastAt: number;
-  startIndex: number;
-  stopUntilNextGesture: boolean;
-};
 
 const WRAP_CUE_MS = 240;
-const WHEEL_GESTURE_LULL_MS = 140;
-const WHEEL_HORIZONTAL_INTENT_RATIO = 0.8;
-const WHEEL_MIN_STEP_DELTA = 42;
-const WHEEL_MAX_STEP_DELTA = 96;
-const WHEEL_STEP_WIDTH_RATIO = 0.14;
-const WHEEL_MAX_STEPS_PER_EVENT = 4;
 const PROGRAMMATIC_SCROLL_MS = 420;
 
 function normalizeImages(images: string[]) {
@@ -38,7 +25,6 @@ export default function ProductGallery({ title, images }: Props) {
   const thumbnailStripRef = useRef<HTMLDivElement | null>(null);
   const activeIndexRef = useRef(0);
   const wrapCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const wheelGestureRef = useRef<WheelGestureState | null>(null);
   const programmaticScrollTargetRef = useRef<number | null>(null);
   const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -170,47 +156,6 @@ export default function ProductGallery({ title, images }: Props) {
     setSelectedIndex(index, index > activeIndex ? "next" : "previous");
   }
 
-  function normalizeWheelDelta(delta: number, deltaMode: number, viewportSize: number) {
-    if (deltaMode === 1) {
-      return delta * 40;
-    }
-
-    if (deltaMode === 2) {
-      return delta * viewportSize;
-    }
-
-    return delta;
-  }
-
-  function getWheelStepDelta(viewportWidth: number) {
-    return Math.min(Math.max(viewportWidth * WHEEL_STEP_WIDTH_RATIO, WHEEL_MIN_STEP_DELTA), WHEEL_MAX_STEP_DELTA);
-  }
-
-  function applyWheelStep(direction: GalleryDirection, gestureStartIndex: number) {
-    const current = activeIndexRef.current;
-
-    if (current === gallery.length - 1 && direction === "next") {
-      if (gestureStartIndex === gallery.length - 1) {
-        setSelectedIndex(0, "next", true);
-        return "wrapped";
-      }
-
-      return "edge";
-    }
-
-    if (current === 0 && direction === "previous") {
-      if (gestureStartIndex === 0) {
-        setSelectedIndex(gallery.length - 1, "previous", true);
-        return "wrapped";
-      }
-
-      return "edge";
-    }
-
-    setSelectedIndex(direction === "next" ? current + 1 : current - 1, direction);
-    return "moved";
-  }
-
   function handleScroll(event: UIEvent<HTMLDivElement>) {
     const viewport = event.currentTarget;
     if (gallery.length <= 1 || viewport.clientWidth <= 0) {
@@ -238,66 +183,6 @@ export default function ProductGallery({ title, images }: Props) {
     setTransitionDirection(nextIndex > previousIndex ? "next" : "previous");
     activeIndexRef.current = nextIndex;
     setActiveIndex(nextIndex);
-  }
-
-  function handleWheel(event: WheelEvent<HTMLDivElement>) {
-    if (gallery.length <= 1) {
-      return;
-    }
-
-    const viewport = event.currentTarget;
-    const horizontalDelta = normalizeWheelDelta(event.deltaX, event.deltaMode, viewport.clientWidth);
-    const verticalDelta = normalizeWheelDelta(event.deltaY, event.deltaMode, viewport.clientHeight);
-    if (
-      Math.abs(horizontalDelta) < 1 ||
-      Math.abs(horizontalDelta) < Math.abs(verticalDelta) * WHEEL_HORIZONTAL_INTENT_RATIO
-    ) {
-      return;
-    }
-
-    event.preventDefault();
-
-    const now = window.performance.now();
-    const wheelDirection: GalleryDirection = horizontalDelta > 0 ? "next" : "previous";
-    const currentGesture = wheelGestureRef.current;
-    const isNewGesture =
-      !currentGesture ||
-      currentGesture.direction !== wheelDirection ||
-      now - currentGesture.lastAt > WHEEL_GESTURE_LULL_MS;
-
-    if (isNewGesture) {
-      wheelGestureRef.current = {
-        accumulatedDelta: 0,
-        direction: wheelDirection,
-        lastAt: now,
-        startIndex: activeIndexRef.current,
-        stopUntilNextGesture: false
-      };
-    } else {
-      currentGesture.lastAt = now;
-    }
-
-    const gesture = wheelGestureRef.current;
-    if (!gesture || gesture.stopUntilNextGesture) {
-      return;
-    }
-
-    gesture.accumulatedDelta += horizontalDelta;
-    const stepDelta = getWheelStepDelta(viewport.clientWidth);
-    let stepsTaken = 0;
-
-    while (Math.abs(gesture.accumulatedDelta) >= stepDelta && stepsTaken < WHEEL_MAX_STEPS_PER_EVENT) {
-      const result = applyWheelStep(wheelDirection, gesture.startIndex);
-      stepsTaken += 1;
-
-      if (result !== "moved") {
-        gesture.accumulatedDelta = 0;
-        gesture.stopUntilNextGesture = true;
-        return;
-      }
-
-      gesture.accumulatedDelta -= Math.sign(gesture.accumulatedDelta) * stepDelta;
-    }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -332,9 +217,8 @@ export default function ProductGallery({ title, images }: Props) {
           <div
             ref={viewportRef}
             data-gallery-viewport
-            className="gallery-scroll h-full overflow-x-auto overflow-y-hidden"
+            className="gallery-scroll h-full"
             onScroll={handleScroll}
-            onWheel={handleWheel}
           >
             <div className="flex h-full">
               {gallery.map((imageUrl, index) => (
@@ -414,6 +298,8 @@ export default function ProductGallery({ title, images }: Props) {
 
       <style jsx>{`
         .gallery-scroll {
+          overflow-x: auto;
+          overflow-y: hidden;
           scrollbar-width: none;
           scroll-snap-type: x mandatory;
           touch-action: pan-y pinch-zoom;
@@ -425,6 +311,12 @@ export default function ProductGallery({ title, images }: Props) {
 
         .gallery-slide {
           scroll-snap-align: start;
+        }
+
+        @media (pointer: fine) {
+          .gallery-scroll {
+            overflow-x: hidden;
+          }
         }
 
         @media (pointer: coarse) {
