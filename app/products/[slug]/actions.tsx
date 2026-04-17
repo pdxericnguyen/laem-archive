@@ -137,7 +137,7 @@ export default function ProductActions({
           type="button"
           onClick={handleBuyNow}
           disabled={unavailable || buying}
-          className="h-11 bg-silver text-silver-text border border-silver-border text-sm font-semibold hover:bg-silver-hover active:bg-silver-active disabled:bg-silver-disabled disabled:text-neutral-500 disabled:cursor-not-allowed"
+          className="h-11 bg-silver text-silver-text border border-silver-border text-sm font-semibold transition-colors hover:bg-silver-hover active:bg-silver-active disabled:bg-silver-disabled disabled:text-neutral-500 disabled:cursor-not-allowed"
         >
           {buying ? "Redirecting..." : unavailable ? unavailableLabel : "Buy Now"}
         </button>

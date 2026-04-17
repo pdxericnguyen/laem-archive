@@ -4,11 +4,11 @@ module.exports = {
     extend: {
       colors: {
         silver: {
-          DEFAULT: "#C9C9C9",
-          hover: "#BDBDBD",
-          active: "#B0B0B0",
-          text: "#1A1A1A",
-          border: "#B5B5B5",
+          DEFAULT: "#1F1F1F",
+          hover: "#5A5A5A",
+          active: "#111111",
+          text: "#FAFAFA",
+          border: "#1F1F1F",
           disabled: "#E5E5E5"
         }
       }
