@@ -14,6 +14,35 @@ async function horizontalWheel(page: Page, direction: "previous" | "next", event
   }
 }
 
+async function touchPointerSwipe(page: Page, direction: "previous" | "next") {
+  const gallery = page.locator("[data-gallery-viewport]");
+  const box = await gallery.boundingBox();
+  if (!box) {
+    throw new Error("Gallery bounds not available");
+  }
+
+  const y = box.y + box.height / 2;
+  const startX = direction === "next" ? box.x + box.width * 0.75 : box.x + box.width * 0.25;
+  const endX = direction === "next" ? box.x + box.width * 0.25 : box.x + box.width * 0.75;
+
+  await gallery.evaluate(
+    (element, points) => {
+      const init = {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 1,
+        pointerType: "touch",
+        isPrimary: true,
+        clientY: points.y
+      };
+
+      element.dispatchEvent(new PointerEvent("pointerdown", { ...init, clientX: points.startX }));
+      element.dispatchEvent(new PointerEvent("pointerup", { ...init, clientX: points.endX }));
+    },
+    { startX, endX, y }
+  );
+}
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/dev/gallery-sandbox");
   await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
@@ -30,6 +59,20 @@ test("desktop arrows move and wrap in both directions", async ({ page }) => {
   await expect(page.locator("[data-gallery-counter]")).toHaveText("3 / 3");
 
   await page.getByLabel("Next image").click();
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
+});
+
+test("touch swipe wraps in both directions", async ({ page }) => {
+  await touchPointerSwipe(page, "next");
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("2 / 3");
+
+  await touchPointerSwipe(page, "previous");
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
+
+  await touchPointerSwipe(page, "previous");
+  await expect(page.locator("[data-gallery-counter]")).toHaveText("3 / 3");
+
+  await touchPointerSwipe(page, "next");
   await expect(page.locator("[data-gallery-counter]")).toHaveText("1 / 3");
 });
 
