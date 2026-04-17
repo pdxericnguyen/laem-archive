@@ -1,4 +1,5 @@
 import { getShopItems } from "@/lib/store";
+import { cleanupExpiredInventoryReservations, getAvailableStockForSlugs } from "@/lib/inventory";
 import AddToCartButton from "@/components/AddToCartButton";
 
 export const metadata = { title: "Shop | LAEM Archive" };
@@ -10,6 +11,12 @@ function money(cents: number) {
 
 export default async function ShopPage() {
   const items = await getShopItems();
+  let availableStockBySlug: Record<string, number> = {};
+
+  if (items.length > 0) {
+    await cleanupExpiredInventoryReservations();
+    availableStockBySlug = await getAvailableStockForSlugs(items.map((item) => item.slug));
+  }
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8 md:py-10 space-y-6">
@@ -26,6 +33,7 @@ export default async function ShopPage() {
         <section className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
           {items.map((item) => {
             const primaryImage = item.images[0] || "/placeholder-product.svg";
+            const availableStock = availableStockBySlug[item.slug] || 0;
             return (
             <article key={item.slug} className="group block no-underline space-y-3">
               <a href={`/products/${item.slug}`} className="block no-underline">
@@ -38,7 +46,7 @@ export default async function ShopPage() {
                   />
                   <div className="absolute left-2 top-2">
                     <span className="inline-flex items-center border border-neutral-200 bg-white/90 px-2 py-1 text-[10px] font-medium uppercase tracking-[0.12em] text-neutral-700">
-                      {item.stock > 0 ? `${item.stock} available` : "Sold out"}
+                      {availableStock > 0 ? `${availableStock} available` : "Sold out"}
                     </span>
                   </div>
                 </div>
@@ -60,7 +68,7 @@ export default async function ShopPage() {
                   title={item.title}
                   priceCents={item.priceCents}
                   image={primaryImage}
-                  stock={item.stock}
+                  stock={availableStock}
                   unavailableLabel="Sold out"
                 />
               </div>

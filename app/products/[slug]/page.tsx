@@ -1,8 +1,10 @@
 import { getProduct } from "@/lib/store";
+import { cleanupExpiredInventoryReservations, getAvailableStock } from "@/lib/inventory";
 import ProductGallery from "./gallery";
 import ProductActions from "./actions";
 
 export const metadata = { title: "Product | LAEM Archive" };
+export const dynamic = "force-dynamic";
 
 export default async function ProductPage({ params }: { params: { slug: string } }) {
   const product = await getProduct(params.slug);
@@ -14,7 +16,9 @@ export default async function ProductPage({ params }: { params: { slug: string }
     );
   }
 
-  const isUnavailable = product.archived || product.stock <= 0;
+  await cleanupExpiredInventoryReservations();
+  const availableStock = await getAvailableStock(product.slug);
+  const isUnavailable = product.archived || availableStock <= 0;
   const description =
     product.description && product.description !== product.subtitle ? product.description : "";
   const primaryImage = product.images[0] || "/placeholder-product.svg";
@@ -44,7 +48,7 @@ export default async function ProductPage({ params }: { params: { slug: string }
               <div className="space-y-1 text-right">
                 <div className="uppercase tracking-[0.12em] text-neutral-500">Availability</div>
                 <div className="text-sm font-medium text-neutral-900">
-                  {product.archived ? "Archived" : product.stock > 0 ? `${product.stock} available` : "Sold out"}
+                  {product.archived ? "Archived" : availableStock > 0 ? `${availableStock} available` : "Sold out"}
                 </div>
               </div>
             </div>
@@ -54,12 +58,12 @@ export default async function ProductPage({ params }: { params: { slug: string }
               title={product.title}
               priceCents={product.priceCents}
               image={primaryImage}
-              stock={product.stock}
+              stock={availableStock}
               unavailable={isUnavailable}
               unavailableLabel={product.archived ? "Archived" : "Sold out"}
             />
 
-            {product.stock <= 0 && !product.archived && (
+            {availableStock <= 0 && !product.archived && (
               <div className="text-sm text-neutral-700">
                 <p className="mb-2">This piece is currently sold out.</p>
                 <div className="flex gap-3">

@@ -423,9 +423,21 @@ export async function reconcileReservedStockForSlugs(
   );
 }
 
+export async function getAvailableStockForSlugs(slugs: string[]): Promise<Record<string, number>> {
+  const uniqueSlugs = [...new Set(slugs.map((slug) => slug.trim()).filter(Boolean))];
+  const rows = await Promise.all(
+    uniqueSlugs.map(async (slug) => {
+      const [stock, reserved] = await Promise.all([getStock(slug), getReservedStock(slug)]);
+      return [slug, Math.max(0, stock - reserved)] as const;
+    })
+  );
+
+  return Object.fromEntries(rows);
+}
+
 export async function getAvailableStock(slug: string): Promise<number> {
-  const [stock, reserved] = await Promise.all([getStock(slug), getReservedStock(slug)]);
-  return Math.max(0, stock - reserved);
+  const availabilityBySlug = await getAvailableStockForSlugs([slug]);
+  return availabilityBySlug[slug] || 0;
 }
 
 export async function reserveInventoryForCheckoutSession(
