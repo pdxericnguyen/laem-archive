@@ -1,6 +1,6 @@
 "use client";
 
-import { type KeyboardEvent, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type TouchEvent, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Props = {
   title: string;
@@ -11,6 +11,8 @@ type GalleryDirection = "previous" | "next";
 
 const WRAP_CUE_MS = 240;
 const PROGRAMMATIC_SCROLL_MS = 420;
+const SWIPE_MIN_DISTANCE_PX = 42;
+const SWIPE_AXIS_RATIO = 1.2;
 
 function normalizeImages(images: string[]) {
   return images.map((item) => item.trim()).filter(Boolean);
@@ -27,6 +29,7 @@ export default function ProductGallery({ title, images }: Props) {
   const wrapCueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const programmaticScrollTargetRef = useRef<number | null>(null);
   const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const hasImages = gallery.length > 0;
 
@@ -202,6 +205,53 @@ export default function ProductGallery({ title, images }: Props) {
     }
   }
 
+  function handleTouchStart(event: TouchEvent<HTMLDivElement>) {
+    if (gallery.length <= 1 || event.touches.length !== 1) {
+      touchStartRef.current = null;
+      return;
+    }
+
+    const touch = event.touches[0];
+    touchStartRef.current = {
+      x: touch.clientX,
+      y: touch.clientY
+    };
+  }
+
+  function handleTouchEnd(event: TouchEvent<HTMLDivElement>) {
+    const start = touchStartRef.current;
+    touchStartRef.current = null;
+
+    if (!start || gallery.length <= 1) {
+      return;
+    }
+
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      return;
+    }
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+    const absX = Math.abs(deltaX);
+    const absY = Math.abs(deltaY);
+
+    if (absX < SWIPE_MIN_DISTANCE_PX || absX < absY * SWIPE_AXIS_RATIO) {
+      return;
+    }
+
+    if (deltaX < 0) {
+      next();
+      return;
+    }
+
+    prev();
+  }
+
+  function handleTouchCancel() {
+    touchStartRef.current = null;
+  }
+
   return (
     <div className="space-y-3">
       <div
@@ -219,6 +269,9 @@ export default function ProductGallery({ title, images }: Props) {
             data-gallery-viewport
             className="gallery-scroll h-full"
             onScroll={handleScroll}
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchCancel}
           >
             <div className="flex h-full">
               {gallery.map((imageUrl, index) => (
@@ -298,12 +351,11 @@ export default function ProductGallery({ title, images }: Props) {
 
       <style jsx>{`
         .gallery-scroll {
-          overflow-x: auto;
+          overflow-x: hidden;
           overflow-y: hidden;
           scrollbar-width: none;
           scroll-snap-type: x mandatory;
-          touch-action: pan-x pan-y pinch-zoom;
-          -webkit-overflow-scrolling: touch;
+          touch-action: pan-y pinch-zoom;
         }
 
         .gallery-scroll::-webkit-scrollbar {
@@ -312,12 +364,6 @@ export default function ProductGallery({ title, images }: Props) {
 
         .gallery-slide {
           scroll-snap-align: start;
-        }
-
-        @media (pointer: fine) {
-          .gallery-scroll {
-            overflow-x: hidden;
-          }
         }
 
         @media (pointer: coarse) {
