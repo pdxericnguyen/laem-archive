@@ -67,13 +67,23 @@ async function updateProductSnapshot(
 export async function syncProductStockAndArchiveState(slug: string, stockValue: number) {
   const stock = Math.max(0, Math.floor(stockValue));
   return updateProductSnapshot(slug, (product) => {
-    const shouldAutoArchive = Boolean(product.autoArchiveOnZero) && stock <= 0;
+    const wasAutoArchived = typeof product.autoArchivedAt === "number" && product.autoArchivedAt > 0;
+    const shouldAutoArchive =
+      Boolean(product.autoArchiveOnZero) &&
+      Boolean(product.published) &&
+      stock <= 0 &&
+      (!product.archived || wasAutoArchived);
     const shouldRestoreFromAutoArchive =
-      Boolean(product.autoArchiveOnZero) && Boolean(product.archived) && product.stock <= 0 && stock > 0;
+      Boolean(product.autoArchiveOnZero) && wasAutoArchived && Boolean(product.archived) && stock > 0;
+    const nextAutoArchivedAt = shouldAutoArchive
+      ? product.autoArchivedAt || Date.now()
+      : undefined;
+
     return {
       ...product,
       stock,
-      archived: shouldAutoArchive ? true : shouldRestoreFromAutoArchive ? false : Boolean(product.archived)
+      archived: shouldAutoArchive ? true : shouldRestoreFromAutoArchive ? false : Boolean(product.archived),
+      autoArchivedAt: nextAutoArchivedAt
     };
   });
 }

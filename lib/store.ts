@@ -8,6 +8,7 @@ export type Product = {
   priceCents: number;
   stock: number;
   archived: boolean;
+  autoArchivedAt?: number;
   published: boolean;
   autoArchiveOnZero: boolean;
   images: string[];
@@ -50,8 +51,9 @@ function normalizeProduct(input: unknown): Product | null {
 
   const subtitle = asString(row.subtitle);
   const description = asString(row.description, subtitle);
+  const autoArchivedAt = Math.max(0, Math.floor(asNumber(row.autoArchivedAt)));
 
-  return {
+  const product: Product = {
     slug,
     title,
     subtitle,
@@ -67,6 +69,12 @@ function normalizeProduct(input: unknown): Product | null {
     care: asString(row.care),
     shippingReturns: asString(row.shippingReturns)
   };
+
+  if (autoArchivedAt > 0) {
+    product.autoArchivedAt = autoArchivedAt;
+  }
+
+  return product;
 }
 
 async function getAllProducts(): Promise<Product[]> {

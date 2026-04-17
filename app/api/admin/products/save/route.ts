@@ -219,6 +219,8 @@ export async function POST(request: Request) {
   const published = payload.status !== "hidden";
   const archived =
     payload.status === "archived" || (payload.status === "live" && payload.autoArchiveOnZero && normalizedStock <= 0);
+  const autoArchivedAt =
+    payload.status === "live" && payload.autoArchiveOnZero && normalizedStock <= 0 ? Date.now() : undefined;
 
   const product: Product = {
     slug: payload.slug,
@@ -228,6 +230,7 @@ export async function POST(request: Request) {
     priceCents: normalizedPrice,
     stock: normalizedStock,
     archived,
+    autoArchivedAt,
     published,
     autoArchiveOnZero: payload.autoArchiveOnZero,
     images: payload.images,

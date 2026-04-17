@@ -456,6 +456,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
           </div>
           <p className="text-xs text-neutral-500">
             Live shows in shop. Archived moves the piece to the archive page. Hidden removes it from public pages.
+            Stock controls quantity; Status controls public availability.
           </p>
           <ImageUploadField name="images" />
           <label className="grid gap-1">
@@ -638,7 +639,8 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                 </div>
                 <p className="text-xs text-neutral-500">
                   Keep auto-archive off for a manual sold-out state. Move to Archived whenever you want the piece to
-                  live in the archive instead.
+                  live in the archive instead. When editing manually, set Status to Live after restocking if you want it
+                  purchasable again.
                 </p>
                 <ImageUploadField name="images" defaultValue={product.images.join("\n")} />
                 <label className="grid gap-1">
