@@ -31,7 +31,12 @@ const optionalVars = [
   "RATE_LIMIT_POS_LOGIN_MAX",
   "RATE_LIMIT_POS_LOGIN_WINDOW_SECONDS",
   "RATE_LIMIT_CHECKOUT_MAX",
-  "RATE_LIMIT_CHECKOUT_WINDOW_SECONDS"
+  "RATE_LIMIT_CHECKOUT_WINDOW_SECONDS",
+  "CHECKOUT_MAX_DISTINCT_ITEMS",
+  "CHECKOUT_MAX_UNITS_PER_ITEM",
+  "CHECKOUT_MAX_TOTAL_UNITS",
+  "CHECKOUT_MAX_METADATA_LENGTH",
+  "CHECKOUT_ENFORCE_ORIGIN"
 ];
 
 function isSet(value) {
@@ -102,6 +107,18 @@ function loadEnv() {
   return { ...process.env, ...parsed };
 }
 
+function parseOptionalNumber(env, key) {
+  const value = env[key];
+  if (!isSet(value)) {
+    return null;
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return parsed;
+}
+
 function main() {
   const env = loadEnv();
   const missingRequired = requiredVars.filter((name) => !isSet(env[name]));
@@ -136,6 +153,35 @@ function main() {
   }
   if (!isSet(env.POS_SESSION_SECRET)) {
     warnings.push("POS_SESSION_SECRET is not set; POS sessions will fall back to ADMIN_SESSION_SECRET or token envs.");
+  }
+
+  const reservationTtl = parseOptionalNumber(env, "CHECKOUT_RESERVATION_TTL_SECONDS");
+  if (reservationTtl !== null && reservationTtl < 1800) {
+    warnings.push("CHECKOUT_RESERVATION_TTL_SECONDS below 1800 will be clamped to 1800 seconds (30 minutes).");
+  }
+
+  const maxDistinctItems = parseOptionalNumber(env, "CHECKOUT_MAX_DISTINCT_ITEMS");
+  if (maxDistinctItems !== null && maxDistinctItems > 100) {
+    warnings.push("CHECKOUT_MAX_DISTINCT_ITEMS above 100 is high and increases abuse risk.");
+  }
+
+  const maxUnitsPerItem = parseOptionalNumber(env, "CHECKOUT_MAX_UNITS_PER_ITEM");
+  if (maxUnitsPerItem !== null && maxUnitsPerItem > 100) {
+    warnings.push("CHECKOUT_MAX_UNITS_PER_ITEM above 100 is high and increases abuse risk.");
+  }
+
+  const maxTotalUnits = parseOptionalNumber(env, "CHECKOUT_MAX_TOTAL_UNITS");
+  if (maxTotalUnits !== null && maxTotalUnits > 500) {
+    warnings.push("CHECKOUT_MAX_TOTAL_UNITS above 500 is high and increases abuse risk.");
+  }
+
+  const maxMetadataLength = parseOptionalNumber(env, "CHECKOUT_MAX_METADATA_LENGTH");
+  if (maxMetadataLength !== null && maxMetadataLength > 500) {
+    warnings.push("CHECKOUT_MAX_METADATA_LENGTH above 500 exceeds Stripe metadata limits.");
+  }
+
+  if (isSet(env.CHECKOUT_ENFORCE_ORIGIN) && String(env.CHECKOUT_ENFORCE_ORIGIN).toLowerCase() === "false") {
+    warnings.push("CHECKOUT_ENFORCE_ORIGIN is disabled. Enable it in production to reduce CSRF risk.");
   }
 
   console.log("Environment audit");

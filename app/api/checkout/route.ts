@@ -8,10 +8,17 @@ import {
   releaseInventoryReservation,
   reserveInventoryForCheckoutSession
 } from "@/lib/inventory";
+import {
+  buildCheckoutSessionCookie,
+  CHECKOUT_SESSION_COOKIE,
+  isAllowedRequestOrigin,
+  isCheckoutSessionId,
+  readCookieValue,
+  shouldEnforceCheckoutOriginGuard
+} from "@/lib/checkout-session";
 import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
-const CHECKOUT_SESSION_COOKIE = "laem_checkout_session";
 
 type CheckoutItem = {
   slug: string;
@@ -29,27 +36,46 @@ function normalizeSiteUrl(url: string) {
   return url.replace(/\/+$/, "");
 }
 
-function readCookieValue(cookieHeader: string | null | undefined, keyName: string) {
-  if (!cookieHeader) {
-    return null;
+function asBoundedInt(value: string | undefined, fallback: number, min: number, max: number) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
   }
-
-  const parts = cookieHeader.split(";");
-  for (const rawPart of parts) {
-    const part = rawPart.trim();
-    if (!part.startsWith(`${keyName}=`)) {
-      continue;
-    }
-    const value = part.slice(keyName.length + 1).trim();
-    return value || null;
-  }
-  return null;
+  return Math.min(max, Math.max(min, Math.floor(parsed)));
 }
 
-function buildCheckoutSessionCookie(sessionId: string, maxAgeSeconds: number) {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  const maxAge = Math.max(60, Math.floor(maxAgeSeconds));
-  return `${CHECKOUT_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${secure}`;
+type CheckoutLimits = {
+  maxDistinctItems: number;
+  maxUnitsPerItem: number;
+  maxTotalUnits: number;
+  maxMetadataLength: number;
+};
+
+function getCheckoutLimits(): CheckoutLimits {
+  return {
+    maxDistinctItems: asBoundedInt(process.env.CHECKOUT_MAX_DISTINCT_ITEMS, 20, 1, 100),
+    maxUnitsPerItem: asBoundedInt(process.env.CHECKOUT_MAX_UNITS_PER_ITEM, 10, 1, 100),
+    maxTotalUnits: asBoundedInt(process.env.CHECKOUT_MAX_TOTAL_UNITS, 30, 1, 500),
+    maxMetadataLength: asBoundedInt(process.env.CHECKOUT_MAX_METADATA_LENGTH, 450, 64, 500)
+  };
+}
+
+function validateCheckoutLimits(items: CheckoutItem[], limits: CheckoutLimits) {
+  if (items.length > limits.maxDistinctItems) {
+    return `Too many unique items in checkout. Maximum is ${limits.maxDistinctItems}.`;
+  }
+
+  const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
+  if (totalUnits > limits.maxTotalUnits) {
+    return `Too many total units in checkout. Maximum is ${limits.maxTotalUnits}.`;
+  }
+
+  const overLimit = items.find((item) => item.quantity > limits.maxUnitsPerItem);
+  if (overLimit) {
+    return `Quantity for ${overLimit.slug} exceeds limit of ${limits.maxUnitsPerItem}.`;
+  }
+
+  return null;
 }
 
 async function releasePreviousCheckoutReservation(
@@ -57,7 +83,7 @@ async function releasePreviousCheckoutReservation(
   request: Request
 ) {
   const priorSessionId = readCookieValue(request.headers.get("cookie"), CHECKOUT_SESSION_COOKIE);
-  if (!priorSessionId || !priorSessionId.startsWith("cs_")) {
+  if (!isCheckoutSessionId(priorSessionId)) {
     return;
   }
 
@@ -146,7 +172,10 @@ async function parseCheckoutRequest(request: Request): Promise<ParsedCheckoutReq
     };
   }
 
-  const formData = await request.formData();
+  const formData = await request.formData().catch(() => null);
+  if (!formData) {
+    return null;
+  }
   const slug = formData.get("slug");
   const quantity = formData.get("quantity");
   const single = normalizeItem(slug, quantity);
@@ -211,11 +240,26 @@ export async function POST(request: Request) {
   }
 
   const { items, wantsJson } = parsed;
+  if (shouldEnforceCheckoutOriginGuard() && !isAllowedRequestOrigin(request.headers.get("origin"), siteUrl)) {
+    const errorMessage = "Invalid request origin";
+    return wantsJson
+      ? jsonResponse({ ok: false, error: errorMessage }, 403, rateLimitHeaders)
+      : new Response(errorMessage, { status: 403, headers: rateLimitHeaders });
+  }
+
   if (items.length === 0) {
     const errorMessage = "Missing items";
     return wantsJson
       ? jsonResponse({ ok: false, error: errorMessage }, 400, rateLimitHeaders)
       : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
+  }
+
+  const limits = getCheckoutLimits();
+  const limitsError = validateCheckoutLimits(items, limits);
+  if (limitsError) {
+    return wantsJson
+      ? jsonResponse({ ok: false, error: limitsError }, 400, rateLimitHeaders)
+      : new Response(limitsError, { status: 400, headers: rateLimitHeaders });
   }
 
   const stripe = new Stripe(stripeSecretKey, {
@@ -276,6 +320,13 @@ export async function POST(request: Request) {
     ? `${baseUrl}/products/${singleSlug}?canceled=1`
     : `${baseUrl}/cart?canceled=1`;
   const expiresAt = Math.floor(Date.now() / 1000) + getCheckoutReservationTtlSeconds();
+  const cartMetadata = serializeCartMetadata(items);
+  if (cartMetadata.length > limits.maxMetadataLength) {
+    const errorMessage = "Cart payload too large for checkout session metadata.";
+    return wantsJson
+      ? jsonResponse({ ok: false, error: errorMessage }, 400, rateLimitHeaders)
+      : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
+  }
 
   let session: Stripe.Checkout.Session;
 
@@ -291,7 +342,7 @@ export async function POST(request: Request) {
       },
       line_items: lineItems,
       metadata: {
-        cart: serializeCartMetadata(items),
+        cart: cartMetadata,
         ...(singleSlug ? { slug: singleSlug } : {})
       }
     });

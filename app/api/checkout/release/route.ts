@@ -1,41 +1,42 @@
 import Stripe from "stripe";
 
+import {
+  CHECKOUT_SESSION_COOKIE,
+  clearCheckoutSessionCookieHeader,
+  isAllowedRequestOrigin,
+  isCheckoutSessionId,
+  readCookieValue,
+  shouldEnforceCheckoutOriginGuard
+} from "@/lib/checkout-session";
 import { releaseInventoryReservation } from "@/lib/inventory";
 
 export const runtime = "nodejs";
 
-const CHECKOUT_SESSION_COOKIE = "laem_checkout_session";
-
-function readCookieValue(cookieHeader: string | null | undefined, keyName: string) {
-  if (!cookieHeader) {
-    return null;
-  }
-
-  const parts = cookieHeader.split(";");
-  for (const rawPart of parts) {
-    const part = rawPart.trim();
-    if (!part.startsWith(`${keyName}=`)) {
-      continue;
-    }
-    const value = part.slice(keyName.length + 1).trim();
-    return value || null;
-  }
-  return null;
-}
-
-function clearCheckoutCookieHeader() {
-  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
-  return `${CHECKOUT_SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax${secure}`;
-}
-
 export async function POST(request: Request) {
+  const siteUrl = process.env.SITE_URL;
+  if (
+    siteUrl &&
+    shouldEnforceCheckoutOriginGuard() &&
+    !isAllowedRequestOrigin(request.headers.get("origin"), siteUrl)
+  ) {
+    return Response.json(
+      { ok: false, error: "Invalid request origin" },
+      {
+        status: 403,
+        headers: {
+          "set-cookie": clearCheckoutSessionCookieHeader()
+        }
+      }
+    );
+  }
+
   const sessionId = readCookieValue(request.headers.get("cookie"), CHECKOUT_SESSION_COOKIE);
-  if (!sessionId || !sessionId.startsWith("cs_")) {
+  if (!isCheckoutSessionId(sessionId)) {
     return Response.json(
       { ok: true, released: false },
       {
         headers: {
-          "set-cookie": clearCheckoutCookieHeader()
+          "set-cookie": clearCheckoutSessionCookieHeader()
         }
       }
     );
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
     { ok: true, released: true },
     {
       headers: {
-        "set-cookie": clearCheckoutCookieHeader()
+        "set-cookie": clearCheckoutSessionCookieHeader()
       }
     }
   );

@@ -18,17 +18,14 @@ function hasEnv(name: string) {
   return Boolean(process.env[name] && process.env[name]?.trim());
 }
 
-function hasAnyEnv(names: string[]) {
-  return names.some((name) => hasEnv(name));
-}
-
 export function getAdminHealthSummary(): AdminHealthSummary {
   const checks: AdminHealthCheck[] = [
     {
       id: "stripe",
       label: "Stripe",
-      ok: hasAnyEnv(["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"]),
-      message: "Requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET for checkout/order processing."
+      ok: hasEnv("STRIPE_SECRET_KEY") && hasEnv("STRIPE_WEBHOOK_SECRET") && hasEnv("SITE_URL"),
+      message:
+        "Requires STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, and SITE_URL for checkout/order processing."
     },
     {
       id: "redis",
