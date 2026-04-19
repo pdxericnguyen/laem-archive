@@ -175,11 +175,14 @@ async function resolveCheckoutShippingAddress(stripe: Stripe, session: Stripe.Ch
 async function maybeAutoPrintPackingSlip(
   order: Parameters<typeof writeOrder>[0]
 ): Promise<OrderPrintJob | undefined> {
-  if (order.channel !== "checkout") {
-    return undefined;
-  }
+  const shouldAutoPrintForOrder =
+    order.channel === "checkout"
+      ? String(process.env.AUTO_PRINT_PACKING_SLIP || "false").toLowerCase() === "true"
+      : order.channel === "terminal"
+        ? String(process.env.AUTO_PRINT_PACKING_SLIP_POS || "false").toLowerCase() === "true"
+        : false;
 
-  if (String(process.env.AUTO_PRINT_PACKING_SLIP || "false").toLowerCase() !== "true") {
+  if (!shouldAutoPrintForOrder) {
     return undefined;
   }
 
