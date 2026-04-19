@@ -58,7 +58,7 @@ export function getPrintNodeApiKey() {
 }
 
 export function getPrintNodePrinterId(
-  envVarName: "PRINTNODE_SLIP_PRINTER_ID" | "PRINTNODE_LABEL_PRINTER_ID"
+  envVarName: "PRINTNODE_SLIP_PRINTER_ID" | "PRINTNODE_POS_SLIP_PRINTER_ID" | "PRINTNODE_LABEL_PRINTER_ID"
 ) {
   return parsePrinterId(process.env[envVarName]);
 }

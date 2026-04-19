@@ -186,13 +186,21 @@ async function maybeAutoPrintPackingSlip(
     return undefined;
   }
 
-  const printerId = getPrintNodePrinterId("PRINTNODE_SLIP_PRINTER_ID");
+  const printerId =
+    order.channel === "terminal"
+      ? getPrintNodePrinterId("PRINTNODE_POS_SLIP_PRINTER_ID") ||
+        getPrintNodePrinterId("PRINTNODE_SLIP_PRINTER_ID")
+      : getPrintNodePrinterId("PRINTNODE_SLIP_PRINTER_ID");
+
   if (!printerId) {
     return {
       status: "disabled",
       provider: "printnode",
       externalId: null,
-      error: "Missing PRINTNODE_SLIP_PRINTER_ID.",
+      error:
+        order.channel === "terminal"
+          ? "Missing PRINTNODE_POS_SLIP_PRINTER_ID (or fallback PRINTNODE_SLIP_PRINTER_ID)."
+          : "Missing PRINTNODE_SLIP_PRINTER_ID.",
       updatedAt: Math.floor(Date.now() / 1000)
     };
   }
