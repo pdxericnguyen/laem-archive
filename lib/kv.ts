@@ -48,6 +48,7 @@ export const key = {
   stock: (slug: string) => `stock:${slug}`,
   reserved: (slug: string) => `reserved:${slug}`,
   order: (id: string) => `order:${id}`,
+  orderProcessingLock: (id: string) => `order:processing:${id}`,
   ordersIndex: "orders:index",
   reservation: (sessionId: string) => `reservation:${sessionId}`,
   reservationsExpiring: "reservations:expiring",

@@ -9,8 +9,9 @@ import {
   type StockRequest
 } from "@/lib/inventory";
 import {
+  acquireOrderProcessingLock,
   appendOrderToIndex,
-  hasOrder,
+  releaseOrderProcessingLock,
   writeOrder,
   type OrderPrintJob,
   type OrderChannel,
@@ -223,29 +224,80 @@ async function maybeAutoPrintPackingSlip(
 }
 
 async function finalizeSuccessfulOrder(params: FinalizeOrderParams) {
-  const orderExists = await hasOrder(params.id);
-  if (orderExists) {
-    return "duplicate" as const;
+  const lock = await acquireOrderProcessingLock(params.id);
+  if (lock.ok === false) {
+    return lock.reason === "already_processed" ? ("duplicate" as const) : ("busy" as const);
   }
 
-  const stockResult =
-    (await consumeInventoryReservation(params.id)) || (await decrementMultipleStockAtomic(params.items));
-  const totalQuantity = params.items.reduce((sum, item) => sum + item.quantity, 0);
-  const primarySlug = params.items[0]?.slug || null;
+  try {
+    const stockResult =
+      (await consumeInventoryReservation(params.id)) || (await decrementMultipleStockAtomic(params.items));
+    const totalQuantity = params.items.reduce((sum, item) => sum + item.quantity, 0);
+    const primarySlug = params.items[0]?.slug || null;
 
-  if (!stockResult.ok) {
-    const failedSlug = stockResult.failedSlug ?? primarySlug;
-    const failedItem = stockResult.items[0];
-    const available = failedItem ? failedItem.current : 0;
+    if (!stockResult.ok) {
+      const failedSlug = stockResult.failedSlug ?? primarySlug;
+      const failedItem = stockResult.items[0];
+      const available = failedItem ? failedItem.current : 0;
 
-    const conflictOrder = {
+      const conflictOrder = {
+        id: params.id,
+        slug: failedSlug,
+        email: params.email,
+        created: params.created,
+        quantity: totalQuantity,
+        items: params.items,
+        status: "stock_conflict" as const,
+        amount_total: params.amountTotal,
+        currency: params.currency,
+        channel: params.channel,
+        stripeObjectType: params.stripeObjectType,
+        shippingAddress: params.shippingAddress
+      };
+
+      await writeOrder(conflictOrder);
+      await appendOrderToIndex(params.id);
+
+      console.error("Insufficient stock during webhook processing", {
+        orderId: params.id,
+        failedSlug,
+        requested: params.items,
+        available,
+        channel: params.channel
+      });
+
+      try {
+        await sendInventoryAlertEmail({
+          kind: "oversell",
+          slug: failedSlug || "unknown",
+          currentStock: available,
+          previousStock: available,
+          quantity: totalQuantity,
+          orderId: params.id
+        });
+      } catch (error) {
+        console.error("Inventory oversell alert failed", {
+          orderId: params.id,
+          slug: failedSlug,
+          error
+        });
+      }
+
+      return "conflict" as const;
+    }
+
+    for (const item of stockResult.items) {
+      await syncProductStockAndArchiveState(item.slug, item.next);
+    }
+
+    let orderRecord: Parameters<typeof writeOrder>[0] = {
       id: params.id,
-      slug: failedSlug,
+      slug: primarySlug,
       email: params.email,
       created: params.created,
       quantity: totalQuantity,
       items: params.items,
-      status: "stock_conflict" as const,
+      status: "paid" as const,
       amount_total: params.amountTotal,
       currency: params.currency,
       channel: params.channel,
@@ -253,119 +305,79 @@ async function finalizeSuccessfulOrder(params: FinalizeOrderParams) {
       shippingAddress: params.shippingAddress
     };
 
-    await writeOrder(conflictOrder);
+    await writeOrder(orderRecord);
     await appendOrderToIndex(params.id);
 
-    console.error("Insufficient stock during webhook processing", {
-      orderId: params.id,
-      failedSlug,
-      requested: params.items,
-      available,
-      channel: params.channel
-    });
-
-    try {
-      await sendInventoryAlertEmail({
-        kind: "oversell",
-        slug: failedSlug || "unknown",
-        currentStock: available,
-        previousStock: available,
-        quantity: totalQuantity,
-        orderId: params.id
-      });
-    } catch (error) {
-      console.error("Inventory oversell alert failed", {
-        orderId: params.id,
-        slug: failedSlug,
-        error
-      });
+    const packingSlipPrint = await maybeAutoPrintPackingSlip(orderRecord);
+    if (packingSlipPrint) {
+      orderRecord = {
+        ...orderRecord,
+        printing: {
+          ...(orderRecord.printing || {}),
+          packingSlip: packingSlipPrint
+        }
+      };
+      await writeOrder(orderRecord);
     }
 
-    return "conflict" as const;
-  }
-
-  for (const item of stockResult.items) {
-    await syncProductStockAndArchiveState(item.slug, item.next);
-  }
-
-  let orderRecord: Parameters<typeof writeOrder>[0] = {
-    id: params.id,
-    slug: primarySlug,
-    email: params.email,
-    created: params.created,
-    quantity: totalQuantity,
-    items: params.items,
-    status: "paid" as const,
-    amount_total: params.amountTotal,
-    currency: params.currency,
-    channel: params.channel,
-    stripeObjectType: params.stripeObjectType,
-    shippingAddress: params.shippingAddress
-  };
-
-  await writeOrder(orderRecord);
-  await appendOrderToIndex(params.id);
-
-  const packingSlipPrint = await maybeAutoPrintPackingSlip(orderRecord);
-  if (packingSlipPrint) {
-    orderRecord = {
-      ...orderRecord,
-      printing: {
-        ...(orderRecord.printing || {}),
-        packingSlip: packingSlipPrint
+    for (const item of stockResult.items) {
+      if (!item.transition) {
+        continue;
       }
-    };
-    await writeOrder(orderRecord);
-  }
-
-  for (const item of stockResult.items) {
-    if (!item.transition) {
-      continue;
-    }
-    console.warn("Inventory threshold transition", {
-      orderId: params.id,
-      slug: item.slug,
-      transition: item.transition,
-      previous: item.current,
-      next: item.next
-    });
-    try {
-      await sendInventoryAlertEmail({
-        kind: item.transition,
-        slug: item.slug,
-        currentStock: item.next,
-        previousStock: item.current,
-        quantity: item.requested,
-        orderId: params.id
-      });
-    } catch (error) {
-      console.error("Inventory transition alert failed", {
+      console.warn("Inventory threshold transition", {
         orderId: params.id,
         slug: item.slug,
         transition: item.transition,
-        error
+        previous: item.current,
+        next: item.next
       });
+      try {
+        await sendInventoryAlertEmail({
+          kind: item.transition,
+          slug: item.slug,
+          currentStock: item.next,
+          previousStock: item.current,
+          quantity: item.requested,
+          orderId: params.id
+        });
+      } catch (error) {
+        console.error("Inventory transition alert failed", {
+          orderId: params.id,
+          slug: item.slug,
+          transition: item.transition,
+          error
+        });
+      }
     }
-  }
 
-  if (orderRecord.email) {
-    const firstProduct = primarySlug ? await getProduct(primarySlug) : null;
+    if (orderRecord.email) {
+      const firstProduct = primarySlug ? await getProduct(primarySlug) : null;
+      try {
+        await sendOrderReceivedEmail({
+          orderId: params.id,
+          customerEmail: orderRecord.email,
+          productTitle: firstProduct?.title ?? null,
+          quantity: totalQuantity
+        });
+      } catch (error) {
+        console.error("Order received email failed", {
+          orderId: params.id,
+          error
+        });
+      }
+    }
+
+    return "processed" as const;
+  } finally {
     try {
-      await sendOrderReceivedEmail({
-        orderId: params.id,
-        customerEmail: orderRecord.email,
-        productTitle: firstProduct?.title ?? null,
-        quantity: totalQuantity
-      });
+      await releaseOrderProcessingLock(params.id, lock.token);
     } catch (error) {
-      console.error("Order received email failed", {
+      console.error("Failed to release order processing lock", {
         orderId: params.id,
         error
       });
     }
   }
-
-  return "processed" as const;
 }
 
 export async function POST(request: Request) {
@@ -440,6 +452,15 @@ export async function POST(request: Request) {
       return new Response("Already processed", { status: 200 });
     }
 
+    if (outcome === "busy") {
+      return new Response("Order is currently being processed", {
+        status: 503,
+        headers: {
+          "Retry-After": "2"
+        }
+      });
+    }
+
     return new Response("ok", { status: 200 });
   }
 
@@ -478,6 +499,15 @@ export async function POST(request: Request) {
 
   if (outcome === "duplicate") {
     return new Response("Already processed", { status: 200 });
+  }
+
+  if (outcome === "busy") {
+    return new Response("Order is currently being processed", {
+      status: 503,
+      headers: {
+        "Retry-After": "2"
+      }
+    });
   }
 
   return new Response("ok", { status: 200 });

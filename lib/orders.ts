@@ -82,6 +82,32 @@ export type OrderRecord = {
   conflictResolution?: OrderConflictResolution;
 };
 
+type OrderProcessingLockResult =
+  | {
+      ok: true;
+      token: string;
+    }
+  | {
+      ok: false;
+      reason: "already_processed" | "busy";
+    };
+
+function getOrderProcessingLockTtlSeconds() {
+  const parsed = Number(process.env.WEBHOOK_ORDER_LOCK_TTL_SECONDS || "900");
+  if (!Number.isFinite(parsed)) {
+    return 900;
+  }
+  return Math.max(30, Math.min(3600, Math.floor(parsed)));
+}
+
+function generateOrderProcessingLockToken() {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+}
+
 type LooseOrderRecord = {
   id?: unknown;
   slug?: unknown;
@@ -416,6 +442,59 @@ export async function writeOrder(order: OrderRecord) {
 export async function hasOrder(id: string) {
   const order = await readOrder(id);
   return Boolean(order);
+}
+
+export async function acquireOrderProcessingLock(orderId: string): Promise<OrderProcessingLockResult> {
+  const ttlSeconds = getOrderProcessingLockTtlSeconds();
+  const lockToken = generateOrderProcessingLockToken();
+
+  const script = `
+local orderKey = KEYS[1]
+local lockKey = KEYS[2]
+local lockToken = ARGV[1]
+local ttlSeconds = tonumber(ARGV[2]) or 900
+
+if redis.call("EXISTS", orderKey) == 1 then
+  return 2
+end
+
+local acquired = redis.call("SET", lockKey, lockToken, "NX", "EX", ttlSeconds)
+if acquired then
+  return 1
+end
+
+return 0
+`;
+
+  const result = Number(
+    await kv.eval(script, [key.order(orderId), key.orderProcessingLock(orderId)], [lockToken, String(ttlSeconds)])
+  );
+
+  if (result === 1) {
+    return { ok: true, token: lockToken };
+  }
+
+  if (result === 2) {
+    return { ok: false, reason: "already_processed" };
+  }
+
+  return { ok: false, reason: "busy" };
+}
+
+export async function releaseOrderProcessingLock(orderId: string, token: string) {
+  const script = `
+local lockKey = KEYS[1]
+local lockToken = ARGV[1]
+
+if redis.call("GET", lockKey) == lockToken then
+  redis.call("DEL", lockKey)
+  return 1
+end
+
+return 0
+`;
+
+  await kv.eval(script, [key.orderProcessingLock(orderId)], [token]);
 }
 
 export async function appendOrderToIndex(id: string) {
