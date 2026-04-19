@@ -58,6 +58,8 @@ type OrderRow = {
     note?: string;
     resolvedAt?: number;
   };
+  piiRedactedAt?: number | null;
+  piiRedactionReason?: "retention" | "manual" | string | null;
 };
 
 type Filters = {
@@ -272,6 +274,14 @@ function buildTimeline(row: OrderRow): TimelineEvent[] {
       label: "Conflict resolved",
       at: row.conflictResolution.resolvedAt,
       detail: row.conflictResolution.note || undefined
+    });
+  }
+
+  if (row.piiRedactedAt) {
+    timeline.push({
+      id: "pii-redacted",
+      label: `Customer data redacted (${row.piiRedactionReason || "manual"})`,
+      at: row.piiRedactedAt
     });
   }
 
@@ -732,6 +742,7 @@ function OrderCard({
   const [autoFulfilling, setAutoFulfilling] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [reprinting, setReprinting] = useState<"packingSlip" | "shippingLabel" | null>(null);
+  const [redactingPii, setRedactingPii] = useState(false);
   const [resolveNote, setResolveNote] = useState("Refund handled in Stripe");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -911,6 +922,43 @@ function OrderCard({
     }
   }
 
+  async function redactCustomerData() {
+    const confirmed = window.confirm(
+      "Redact this customer data from the order record? This cannot be automatically undone."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setRedactingPii(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch("/api/admin/orders/redact-pii", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          orderId: row.id
+        })
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.ok) {
+        setError(data?.error || "Unable to redact customer data.");
+        return;
+      }
+
+      const message = data?.already ? "Customer data was already redacted." : "Customer data redacted.";
+      setSuccess(message);
+      await onShipped(message);
+    } catch {
+      setError("Unable to redact customer data.");
+    } finally {
+      setRedactingPii(false);
+    }
+  }
+
   return (
     <div className="border border-neutral-200 p-4 space-y-3">
       <div className="flex items-start justify-between gap-4">
@@ -925,10 +973,16 @@ function OrderCard({
             <div className="text-sm font-medium">{itemSummary(row)}</div>
           </div>
           <div className="text-xs text-neutral-600">
-            {row.email || "-"} | {formatDate(row.created)} | qty {row.quantity ?? "-"} |{" "}
+            {row.email || (row.piiRedactedAt ? "PII redacted" : "-")} | {formatDate(row.created)} | qty{" "}
+            {row.quantity ?? "-"} |{" "}
             {formatMoney(row.amount_total, row.currency)}
           </div>
           <div className="text-[11px] text-neutral-500 mt-1 break-all">Order {row.id}</div>
+          {row.piiRedactedAt ? (
+            <div className="mt-1 text-[11px] text-neutral-500">
+              Customer data redacted on {formatDate(row.piiRedactedAt)}
+            </div>
+          ) : null}
         </div>
         <div className="text-xs uppercase tracking-[0.12em] text-neutral-600">{toStatusLabel(row.status)}</div>
       </div>
@@ -962,6 +1016,14 @@ function OrderCard({
             Copy Tracking #
           </button>
         ) : null}
+        <button
+          type="button"
+          className="inline-flex h-8 items-center border border-neutral-300 px-3 text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
+          onClick={redactCustomerData}
+          disabled={redactingPii || Boolean(row.piiRedactedAt)}
+        >
+          {row.piiRedactedAt ? "Customer Data Redacted" : redactingPii ? "Redacting..." : "Redact Customer Data"}
+        </button>
       </div>
 
       {shipToAddress ? (
@@ -969,6 +1031,8 @@ function OrderCard({
           <div className="text-xs uppercase tracking-[0.12em] text-neutral-600">Ship To</div>
           <div className="mt-1 whitespace-pre-line">{shipToAddress}</div>
         </div>
+      ) : row.piiRedactedAt ? (
+        <div className="text-xs text-neutral-500">Customer address was redacted from this record.</div>
       ) : null}
 
       <div className="flex flex-wrap gap-2">

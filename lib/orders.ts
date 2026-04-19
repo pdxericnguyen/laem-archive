@@ -10,6 +10,7 @@ export type OrderQueueFilter =
   | "conflicts";
 export type OrderChannel = "checkout" | "terminal";
 export type StripeObjectType = "checkout_session" | "payment_intent";
+export type OrderPiiRedactionReason = "retention" | "manual";
 
 export type OrderShipping = {
   carrier: string;
@@ -80,6 +81,8 @@ export type OrderRecord = {
   printing?: OrderPrinting;
   fulfillment?: OrderFulfillment;
   conflictResolution?: OrderConflictResolution;
+  piiRedactedAt?: number;
+  piiRedactionReason?: OrderPiiRedactionReason;
 };
 
 type OrderProcessingLockResult =
@@ -106,6 +109,18 @@ function generateOrderProcessingLockToken() {
   } catch {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   }
+}
+
+function getOrderPiiRetentionDays() {
+  const parsed = Number(process.env.ORDER_PII_RETENTION_DAYS || "180");
+  if (!Number.isFinite(parsed)) {
+    return 180;
+  }
+  return Math.max(30, Math.min(3650, Math.floor(parsed)));
+}
+
+function parseOrderPiiRedactionReason(value: unknown): OrderPiiRedactionReason | undefined {
+  return value === "manual" || value === "retention" ? value : undefined;
 }
 
 type LooseOrderRecord = {
@@ -174,6 +189,8 @@ type LooseOrderRecord = {
     note?: unknown;
     resolvedAt?: unknown;
   } | null;
+  piiRedactedAt?: unknown;
+  piiRedactionReason?: unknown;
 };
 
 function asString(value: unknown) {
@@ -409,6 +426,8 @@ export function normalizeOrder(input: unknown): OrderRecord | null {
     id,
     channel
   );
+  const piiRedactedAt = asNumber(raw.piiRedactedAt);
+  const piiRedactionReason = parseOrderPiiRedactionReason(raw.piiRedactionReason);
 
   return {
     id,
@@ -426,13 +445,60 @@ export function normalizeOrder(input: unknown): OrderRecord | null {
     shipping: normalizeShipping(raw.shipping),
     printing: normalizePrinting(raw.printing),
     fulfillment: normalizeFulfillment(raw.fulfillment),
-    conflictResolution: normalizeConflictResolution(raw.conflictResolution)
+    conflictResolution: normalizeConflictResolution(raw.conflictResolution),
+    piiRedactedAt: piiRedactedAt ?? undefined,
+    piiRedactionReason
   };
 }
 
-export async function readOrder(id: string) {
+function getOrderPiiRedactionReferenceUnix(order: OrderRecord) {
+  return order.shipping?.shippedAt || order.fulfillment?.purchasedAt || order.created;
+}
+
+export function shouldAutoRedactOrderPii(order: OrderRecord, nowUnix = Math.floor(Date.now() / 1000)) {
+  if (order.piiRedactedAt) {
+    return false;
+  }
+  if (order.status !== "shipped") {
+    return false;
+  }
+  const retentionSeconds = getOrderPiiRetentionDays() * 24 * 60 * 60;
+  const redactionReference = getOrderPiiRedactionReferenceUnix(order);
+  return redactionReference + retentionSeconds <= nowUnix;
+}
+
+export function redactOrderPii(order: OrderRecord, reason: OrderPiiRedactionReason) {
+  if (order.piiRedactedAt) {
+    return order;
+  }
+  return {
+    ...order,
+    email: null,
+    shippingAddress: undefined,
+    piiRedactedAt: Math.floor(Date.now() / 1000),
+    piiRedactionReason: reason
+  };
+}
+
+async function enforceOrderPiiRetention(order: OrderRecord) {
+  if (!shouldAutoRedactOrderPii(order)) {
+    return order;
+  }
+  const redacted = redactOrderPii(order, "retention");
+  await writeOrder(redacted);
+  return redacted;
+}
+
+export async function readOrder(id: string, options?: { skipPiiRetention?: boolean }) {
   const row = await kv.get<unknown>(key.order(id));
-  return normalizeOrder(row);
+  const normalized = normalizeOrder(row);
+  if (!normalized) {
+    return null;
+  }
+  if (options?.skipPiiRetention) {
+    return normalized;
+  }
+  return enforceOrderPiiRetention(normalized);
 }
 
 export async function writeOrder(order: OrderRecord) {
@@ -440,8 +506,23 @@ export async function writeOrder(order: OrderRecord) {
 }
 
 export async function hasOrder(id: string) {
-  const order = await readOrder(id);
+  const order = await readOrder(id, { skipPiiRetention: true });
   return Boolean(order);
+}
+
+export async function redactOrderPiiById(orderId: string) {
+  const order = await readOrder(orderId, { skipPiiRetention: true });
+  if (!order) {
+    return { ok: false as const, reason: "not_found" as const };
+  }
+
+  if (order.piiRedactedAt) {
+    return { ok: true as const, already: true as const, order };
+  }
+
+  const redacted = redactOrderPii(order, "manual");
+  await writeOrder(redacted);
+  return { ok: true as const, already: false as const, order: redacted };
 }
 
 export async function acquireOrderProcessingLock(orderId: string): Promise<OrderProcessingLockResult> {
