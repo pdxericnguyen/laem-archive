@@ -37,26 +37,76 @@ function getMemoryStore() {
   return root[MEMORY_STORE_KEY]!;
 }
 
-function getClientIp(request: Request) {
-  const direct =
-    request.headers.get("x-real-ip") ||
-    request.headers.get("cf-connecting-ip") ||
-    request.headers.get("fly-client-ip");
-  if (direct) {
-    return direct.trim();
+function parseIpCandidate(value: string | null | undefined) {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  if (!trimmed) {
+    return null;
   }
+  const ipv4 = /^(?:\d{1,3}\.){3}\d{1,3}$/;
+  const ipv6 = /^[A-Fa-f0-9:]+$/;
+  if (ipv4.test(trimmed) || ipv6.test(trimmed)) {
+    return trimmed;
+  }
+  return null;
+}
 
-  const forwarded = request.headers.get("x-forwarded-for");
+function parseFirstForwardedIp(value: string | null | undefined) {
+  const forwarded = typeof value === "string" ? value : "";
   if (!forwarded) {
-    return "unknown";
+    return null;
+  }
+  const first = forwarded.split(",")[0]?.trim();
+  return parseIpCandidate(first);
+}
+
+function shouldTrustForwardedForHeader() {
+  return String(process.env.RATE_LIMIT_TRUST_X_FORWARDED_FOR || "").trim().toLowerCase() === "true";
+}
+
+function getTrustedClientIp(request: Request) {
+  const providerHeaders = [
+    request.headers.get("cf-connecting-ip"),
+    request.headers.get("fly-client-ip"),
+    parseFirstForwardedIp(request.headers.get("x-vercel-forwarded-for")),
+    request.headers.get("x-real-ip")
+  ];
+
+  for (const value of providerHeaders) {
+    const parsed = parseIpCandidate(value);
+    if (parsed) {
+      return parsed;
+    }
   }
 
-  const first = forwarded.split(",")[0]?.trim();
-  return first || "unknown";
+  if (shouldTrustForwardedForHeader()) {
+    const forwarded = parseFirstForwardedIp(request.headers.get("x-forwarded-for"));
+    if (forwarded) {
+      return forwarded;
+    }
+  }
+
+  return null;
+}
+
+function getFallbackClientFingerprint(request: Request) {
+  const agent = (request.headers.get("user-agent") || "unknown-agent").slice(0, 80);
+  const language = (request.headers.get("accept-language") || "unknown-language")
+    .split(",")[0]
+    .trim()
+    .slice(0, 24);
+  return `anon:${agent}:${language}`;
+}
+
+export function deriveRateLimitClientId(request: Request) {
+  const trustedIp = getTrustedClientIp(request);
+  if (trustedIp) {
+    return trustedIp;
+  }
+  return getFallbackClientFingerprint(request);
 }
 
 function toKeyPart(value: string) {
-  return value.replace(/[^a-zA-Z0-9_.:-]/g, "_");
+  return value.replace(/[^a-zA-Z0-9_.:-]/g, "_").slice(0, 180);
 }
 
 function buildKey(namespace: string, ip: string, bucket: number) {
@@ -80,8 +130,8 @@ export async function applyRateLimit(
   const windowSeconds = clampInt(options.windowSeconds, 1);
   const windowMs = windowSeconds * 1000;
   const bucket = Math.floor(now / windowMs);
-  const ip = getClientIp(request);
-  const key = buildKey(options.namespace, ip, bucket);
+  const clientId = deriveRateLimitClientId(request);
+  const key = buildKey(options.namespace, clientId, bucket);
   const retryAfterSeconds = Math.max(1, Math.ceil(((bucket + 1) * windowMs - now) / 1000));
 
   if (hasKvEnv()) {

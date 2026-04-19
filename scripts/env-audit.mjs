@@ -32,6 +32,7 @@ const optionalVars = [
   "RATE_LIMIT_POS_LOGIN_WINDOW_SECONDS",
   "RATE_LIMIT_CHECKOUT_MAX",
   "RATE_LIMIT_CHECKOUT_WINDOW_SECONDS",
+  "RATE_LIMIT_TRUST_X_FORWARDED_FOR",
   "CHECKOUT_MAX_DISTINCT_ITEMS",
   "CHECKOUT_MAX_UNITS_PER_ITEM",
   "CHECKOUT_MAX_TOTAL_UNITS",
@@ -186,6 +187,12 @@ function main() {
 
   if (isSet(env.CHECKOUT_ENFORCE_ORIGIN) && String(env.CHECKOUT_ENFORCE_ORIGIN).toLowerCase() === "false") {
     warnings.push("CHECKOUT_ENFORCE_ORIGIN is disabled. Enable it in production to reduce CSRF risk.");
+  }
+
+  if (!isSet(env.RATE_LIMIT_TRUST_X_FORWARDED_FOR)) {
+    warnings.push(
+      "RATE_LIMIT_TRUST_X_FORWARDED_FOR not set. Leave disabled unless your proxy sanitizes x-forwarded-for."
+    );
   }
 
   const stripeRetries = parseOptionalNumber(env, "STRIPE_RETRY_MAX_RETRIES");
