@@ -20,6 +20,7 @@ import {
 import { sendInventoryAlertEmail, sendOrderReceivedEmail } from "@/lib/email";
 import { buildPackingSlipPdfBase64 } from "@/lib/packing-slip-pdf";
 import { createPrintNodeJob, getPrintNodePrinterId } from "@/lib/printnode";
+import { retryStripeOperation } from "@/lib/stripe-retry";
 
 export const runtime = "nodejs";
 
@@ -74,9 +75,11 @@ function parseCartMetadata(value: string | null | undefined): StockRequest[] {
 }
 
 async function getLineItemQuantity(stripe: Stripe, sessionId: string) {
-  const lineItems = await stripe.checkout.sessions.listLineItems(sessionId, {
-    limit: 100
-  });
+  const lineItems = await retryStripeOperation("checkout.sessions.listLineItems(webhook)", () =>
+    stripe.checkout.sessions.listLineItems(sessionId, {
+      limit: 100
+    })
+  );
 
   return lineItems.data.reduce((sum, item) => sum + (item.quantity ?? 0), 0);
 }
@@ -154,7 +157,9 @@ async function resolveCheckoutShippingAddress(stripe: Stripe, session: Stripe.Ch
   }
 
   try {
-    const refreshed = await stripe.checkout.sessions.retrieve(session.id);
+    const refreshed = await retryStripeOperation("checkout.sessions.retrieve(webhook shipping refresh)", () =>
+      stripe.checkout.sessions.retrieve(session.id)
+    );
     return normalizeStripeShippingAddress(getCheckoutShippingDetails(refreshed));
   } catch (error) {
     console.error("Unable to refresh checkout session shipping details", {

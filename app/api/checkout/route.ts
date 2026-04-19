@@ -16,7 +16,13 @@ import {
   readCookieValue,
   shouldEnforceCheckoutOriginGuard
 } from "@/lib/checkout-session";
+import {
+  getCheckoutLimitsFromEnv,
+  validateCartMetadataSize,
+  validateCheckoutLimits
+} from "@/lib/checkout-validation";
 import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
+import { retryStripeOperation } from "@/lib/stripe-retry";
 
 export const runtime = "nodejs";
 
@@ -36,48 +42,6 @@ function normalizeSiteUrl(url: string) {
   return url.replace(/\/+$/, "");
 }
 
-function asBoundedInt(value: string | undefined, fallback: number, min: number, max: number) {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-  return Math.min(max, Math.max(min, Math.floor(parsed)));
-}
-
-type CheckoutLimits = {
-  maxDistinctItems: number;
-  maxUnitsPerItem: number;
-  maxTotalUnits: number;
-  maxMetadataLength: number;
-};
-
-function getCheckoutLimits(): CheckoutLimits {
-  return {
-    maxDistinctItems: asBoundedInt(process.env.CHECKOUT_MAX_DISTINCT_ITEMS, 20, 1, 100),
-    maxUnitsPerItem: asBoundedInt(process.env.CHECKOUT_MAX_UNITS_PER_ITEM, 10, 1, 100),
-    maxTotalUnits: asBoundedInt(process.env.CHECKOUT_MAX_TOTAL_UNITS, 30, 1, 500),
-    maxMetadataLength: asBoundedInt(process.env.CHECKOUT_MAX_METADATA_LENGTH, 450, 64, 500)
-  };
-}
-
-function validateCheckoutLimits(items: CheckoutItem[], limits: CheckoutLimits) {
-  if (items.length > limits.maxDistinctItems) {
-    return `Too many unique items in checkout. Maximum is ${limits.maxDistinctItems}.`;
-  }
-
-  const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
-  if (totalUnits > limits.maxTotalUnits) {
-    return `Too many total units in checkout. Maximum is ${limits.maxTotalUnits}.`;
-  }
-
-  const overLimit = items.find((item) => item.quantity > limits.maxUnitsPerItem);
-  if (overLimit) {
-    return `Quantity for ${overLimit.slug} exceeds limit of ${limits.maxUnitsPerItem}.`;
-  }
-
-  return null;
-}
-
 async function releasePreviousCheckoutReservation(
   stripe: Stripe,
   request: Request
@@ -89,7 +53,9 @@ async function releasePreviousCheckoutReservation(
 
   await releaseInventoryReservation(priorSessionId, "released");
   try {
-    await stripe.checkout.sessions.expire(priorSessionId);
+    await retryStripeOperation("checkout.sessions.expire(prior session)", () =>
+      stripe.checkout.sessions.expire(priorSessionId)
+    );
   } catch {
     // Ignore: session may already be completed/expired/canceled.
   }
@@ -185,10 +151,6 @@ async function parseCheckoutRequest(request: Request): Promise<ParsedCheckoutReq
   };
 }
 
-function serializeCartMetadata(items: CheckoutItem[]) {
-  return items.map((item) => `${item.slug}:${item.quantity}`).join(",");
-}
-
 function jsonResponse(payload: unknown, status: number, headers: HeadersInit) {
   return new Response(JSON.stringify(payload), {
     status,
@@ -254,7 +216,7 @@ export async function POST(request: Request) {
       : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
   }
 
-  const limits = getCheckoutLimits();
+  const limits = getCheckoutLimitsFromEnv();
   const limitsError = validateCheckoutLimits(items, limits);
   if (limitsError) {
     return wantsJson
@@ -320,32 +282,35 @@ export async function POST(request: Request) {
     ? `${baseUrl}/products/${singleSlug}?canceled=1`
     : `${baseUrl}/cart?canceled=1`;
   const expiresAt = Math.floor(Date.now() / 1000) + getCheckoutReservationTtlSeconds();
-  const cartMetadata = serializeCartMetadata(items);
-  if (cartMetadata.length > limits.maxMetadataLength) {
-    const errorMessage = "Cart payload too large for checkout session metadata.";
+  const metadataResult = validateCartMetadataSize(items, limits);
+  if (!metadataResult.ok) {
+    const errorMessage = metadataResult.error;
     return wantsJson
       ? jsonResponse({ ok: false, error: errorMessage }, 400, rateLimitHeaders)
       : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
   }
+  const cartMetadata = metadataResult.cartMetadata;
 
   let session: Stripe.Checkout.Session;
 
   try {
-    session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      expires_at: expiresAt,
-      billing_address_collection: "required",
-      shipping_address_collection: {
-        allowed_countries: getShippingAddressAllowedCountries()
-      },
-      line_items: lineItems,
-      metadata: {
-        cart: cartMetadata,
-        ...(singleSlug ? { slug: singleSlug } : {})
-      }
-    });
+    session = await retryStripeOperation("checkout.sessions.create", () =>
+      stripe.checkout.sessions.create({
+        mode: "payment",
+        success_url: successUrl,
+        cancel_url: cancelUrl,
+        expires_at: expiresAt,
+        billing_address_collection: "required",
+        shipping_address_collection: {
+          allowed_countries: getShippingAddressAllowedCountries()
+        },
+        line_items: lineItems,
+        metadata: {
+          cart: cartMetadata,
+          ...(singleSlug ? { slug: singleSlug } : {})
+        }
+      })
+    );
   } catch (error) {
     console.error("Stripe checkout session creation failed", {
       error,
@@ -360,7 +325,9 @@ export async function POST(request: Request) {
   const reservation = await reserveInventoryForCheckoutSession(session.id, items, session.expires_at || expiresAt);
   if (!reservation.ok) {
     try {
-      await stripe.checkout.sessions.expire(session.id);
+      await retryStripeOperation("checkout.sessions.expire(reservation failure)", () =>
+        stripe.checkout.sessions.expire(session.id)
+      );
     } catch (error) {
       console.error("Unable to expire checkout session after reservation failure", {
         sessionId: session.id,
@@ -379,7 +346,9 @@ export async function POST(request: Request) {
   if (!session.url) {
     await releaseInventoryReservation(session.id);
     try {
-      await stripe.checkout.sessions.expire(session.id);
+      await retryStripeOperation("checkout.sessions.expire(missing session url)", () =>
+        stripe.checkout.sessions.expire(session.id)
+      );
     } catch (error) {
       console.error("Unable to expire checkout session without session url", {
         sessionId: session.id,

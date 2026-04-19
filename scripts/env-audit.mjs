@@ -36,7 +36,11 @@ const optionalVars = [
   "CHECKOUT_MAX_UNITS_PER_ITEM",
   "CHECKOUT_MAX_TOTAL_UNITS",
   "CHECKOUT_MAX_METADATA_LENGTH",
-  "CHECKOUT_ENFORCE_ORIGIN"
+  "CHECKOUT_ENFORCE_ORIGIN",
+  "STRIPE_RETRY_MAX_RETRIES",
+  "STRIPE_RETRY_BASE_DELAY_MS",
+  "STRIPE_RETRY_MAX_DELAY_MS",
+  "STRIPE_RETRY_LOGS"
 ];
 
 function isSet(value) {
@@ -182,6 +186,11 @@ function main() {
 
   if (isSet(env.CHECKOUT_ENFORCE_ORIGIN) && String(env.CHECKOUT_ENFORCE_ORIGIN).toLowerCase() === "false") {
     warnings.push("CHECKOUT_ENFORCE_ORIGIN is disabled. Enable it in production to reduce CSRF risk.");
+  }
+
+  const stripeRetries = parseOptionalNumber(env, "STRIPE_RETRY_MAX_RETRIES");
+  if (stripeRetries !== null && stripeRetries > 6) {
+    warnings.push("STRIPE_RETRY_MAX_RETRIES above 6 may increase latency under outages.");
   }
 
   console.log("Environment audit");

@@ -9,6 +9,7 @@ import {
   shouldEnforceCheckoutOriginGuard
 } from "@/lib/checkout-session";
 import { releaseInventoryReservation } from "@/lib/inventory";
+import { retryStripeOperation } from "@/lib/stripe-retry";
 
 export const runtime = "nodejs";
 
@@ -50,7 +51,9 @@ export async function POST(request: Request) {
       apiVersion: "2023-10-16"
     });
     try {
-      await stripe.checkout.sessions.expire(sessionId);
+      await retryStripeOperation("checkout.sessions.expire(release endpoint)", () =>
+        stripe.checkout.sessions.expire(sessionId)
+      );
     } catch {
       // Ignore: session may already be completed/expired/canceled.
     }

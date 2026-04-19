@@ -3,6 +3,7 @@ import Stripe from "stripe";
 
 import { readOrder, type OrderShippingAddress, writeOrder } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
+import { retryStripeOperation } from "@/lib/stripe-retry";
 
 type SyncPayload = {
   orderId: string;
@@ -106,7 +107,9 @@ export async function POST(request: Request) {
 
   let session: Stripe.Checkout.Session;
   try {
-    session = await stripe.checkout.sessions.retrieve(order.id);
+    session = await retryStripeOperation("checkout.sessions.retrieve(admin sync shipping)", () =>
+      stripe.checkout.sessions.retrieve(order.id)
+    );
   } catch (error) {
     console.error("Failed to retrieve checkout session for shipping sync", {
       orderId: order.id,
