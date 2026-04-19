@@ -23,6 +23,9 @@ export default function SuccessClient({ sessionId }: Props) {
 
   useEffect(() => {
     clear();
+    void fetch("/api/checkout/release", { method: "POST" }).catch(() => {
+      // best effort
+    });
   }, [clear]);
 
   const reference = formatReference(sessionId);

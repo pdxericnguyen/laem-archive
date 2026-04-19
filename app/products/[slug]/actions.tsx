@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useCart } from "@/lib/cart";
 
@@ -34,6 +34,31 @@ export default function ProductActions({
   const [quantity, setQuantity] = useState(1);
   const [status, setStatus] = useState<string | null>(null);
   const [buying, setBuying] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("canceled") !== "1") {
+      return;
+    }
+
+    setStatus("Checkout canceled. Restoring item availability...");
+    void (async () => {
+      try {
+        await fetch("/api/checkout/release", { method: "POST" });
+      } catch {
+        // best effort
+      } finally {
+        params.delete("canceled");
+        const next = params.toString();
+        const nextUrl = next ? `${window.location.pathname}?${next}` : window.location.pathname;
+        window.location.replace(nextUrl);
+      }
+    })();
+  }, []);
 
   function updateQuantity(next: number) {
     setQuantity(clampQuantity(next, stock));

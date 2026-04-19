@@ -18,6 +18,7 @@ export default function CartClient() {
   const { items, hydrated, subtotalCents, replaceItems, setQuantity, removeItem, clear } = useCart();
   const [checkingOut, setCheckingOut] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [refreshWarnings, setRefreshWarnings] = useState<CartRefreshWarning[]>([]);
@@ -32,6 +33,9 @@ export default function CartClient() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("success") === "1") {
       skipRefreshRef.current = true;
+      void fetch("/api/checkout/release", { method: "POST" }).catch(() => {
+        // best effort
+      });
       clear();
       setRefreshWarnings([]);
       setNotice("Payment successful. Thank you.");
@@ -47,6 +51,17 @@ export default function CartClient() {
       params.delete("canceled");
       const next = params.toString();
       window.history.replaceState({}, "", next ? `/cart?${next}` : "/cart");
+
+      void (async () => {
+        try {
+          await fetch("/api/checkout/release", { method: "POST" });
+        } catch {
+          // best effort
+        } finally {
+          refreshedRef.current = false;
+          setRefreshTick((value) => value + 1);
+        }
+      })();
     }
   }, [clear]);
 
@@ -118,7 +133,7 @@ export default function CartClient() {
     return () => {
       cancelled = true;
     };
-  }, [hydrated, items, replaceItems]);
+  }, [hydrated, items, replaceItems, refreshTick]);
 
   const warningMap = useMemo(() => {
     const map = new Map<string, string[]>();

@@ -11,6 +11,7 @@ import {
 import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
+const CHECKOUT_SESSION_COOKIE = "laem_checkout_session";
 
 type CheckoutItem = {
   slug: string;
@@ -26,6 +27,46 @@ type ShippingAllowedCountry = Stripe.Checkout.SessionCreateParams.ShippingAddres
 
 function normalizeSiteUrl(url: string) {
   return url.replace(/\/+$/, "");
+}
+
+function readCookieValue(cookieHeader: string | null | undefined, keyName: string) {
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const parts = cookieHeader.split(";");
+  for (const rawPart of parts) {
+    const part = rawPart.trim();
+    if (!part.startsWith(`${keyName}=`)) {
+      continue;
+    }
+    const value = part.slice(keyName.length + 1).trim();
+    return value || null;
+  }
+  return null;
+}
+
+function buildCheckoutSessionCookie(sessionId: string, maxAgeSeconds: number) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  const maxAge = Math.max(60, Math.floor(maxAgeSeconds));
+  return `${CHECKOUT_SESSION_COOKIE}=${encodeURIComponent(sessionId)}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax${secure}`;
+}
+
+async function releasePreviousCheckoutReservation(
+  stripe: Stripe,
+  request: Request
+) {
+  const priorSessionId = readCookieValue(request.headers.get("cookie"), CHECKOUT_SESSION_COOKIE);
+  if (!priorSessionId || !priorSessionId.startsWith("cs_")) {
+    return;
+  }
+
+  await releaseInventoryReservation(priorSessionId, "released");
+  try {
+    await stripe.checkout.sessions.expire(priorSessionId);
+  } catch {
+    // Ignore: session may already be completed/expired/canceled.
+  }
 }
 
 function asPositiveInt(value: string | undefined, fallback: number) {
@@ -181,6 +222,7 @@ export async function POST(request: Request) {
     apiVersion: "2023-10-16"
   });
 
+  await releasePreviousCheckoutReservation(stripe, request);
   await cleanupExpiredInventoryReservations();
 
   const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [];
@@ -300,8 +342,22 @@ export async function POST(request: Request) {
   }
 
   if (wantsJson) {
-    return jsonResponse({ ok: true, url: session.url }, 200, rateLimitHeaders);
+    return jsonResponse(
+      { ok: true, url: session.url },
+      200,
+      {
+        ...rateLimitHeaders,
+        "set-cookie": buildCheckoutSessionCookie(session.id, getCheckoutReservationTtlSeconds())
+      }
+    );
   }
 
-  return Response.redirect(session.url, 303);
+  return new Response(null, {
+    status: 303,
+    headers: {
+      ...rateLimitHeaders,
+      location: session.url,
+      "set-cookie": buildCheckoutSessionCookie(session.id, getCheckoutReservationTtlSeconds())
+    }
+  });
 }
