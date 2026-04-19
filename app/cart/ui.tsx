@@ -33,9 +33,6 @@ export default function CartClient() {
     const params = new URLSearchParams(window.location.search);
     if (params.get("success") === "1") {
       skipRefreshRef.current = true;
-      void fetch("/api/checkout/release", { method: "POST" }).catch(() => {
-        // best effort
-      });
       clear();
       setRefreshWarnings([]);
       setNotice("Payment successful. Thank you.");
