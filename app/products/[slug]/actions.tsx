@@ -60,6 +60,29 @@ export default function ProductActions({
     })();
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || !unavailable) {
+      return;
+    }
+
+    let canceled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/checkout/release", { method: "POST" });
+        const payload = await response.json().catch(() => null);
+        if (!canceled && payload?.released) {
+          window.location.replace(window.location.pathname + window.location.search);
+        }
+      } catch {
+        // best effort
+      }
+    })();
+
+    return () => {
+      canceled = true;
+    };
+  }, [unavailable]);
+
   function updateQuantity(next: number) {
     setQuantity(clampQuantity(next, stock));
   }
