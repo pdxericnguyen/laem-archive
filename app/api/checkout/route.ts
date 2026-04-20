@@ -202,7 +202,14 @@ export async function POST(request: Request) {
   }
 
   const { items, wantsJson } = parsed;
-  if (shouldEnforceCheckoutOriginGuard() && !isAllowedRequestOrigin(request.headers.get("origin"), siteUrl)) {
+  if (
+    shouldEnforceCheckoutOriginGuard() &&
+    !isAllowedRequestOrigin(
+      request.headers.get("origin"),
+      siteUrl,
+      process.env.CHECKOUT_ALLOWED_ORIGINS
+    )
+  ) {
     const errorMessage = "Invalid request origin";
     return wantsJson
       ? jsonResponse({ ok: false, error: errorMessage }, 403, rateLimitHeaders)

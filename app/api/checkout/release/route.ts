@@ -18,7 +18,11 @@ export async function POST(request: Request) {
   if (
     siteUrl &&
     shouldEnforceCheckoutOriginGuard() &&
-    !isAllowedRequestOrigin(request.headers.get("origin"), siteUrl)
+    !isAllowedRequestOrigin(
+      request.headers.get("origin"),
+      siteUrl,
+      process.env.CHECKOUT_ALLOWED_ORIGINS
+    )
   ) {
     return Response.json(
       { ok: false, error: "Invalid request origin" },

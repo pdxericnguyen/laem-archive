@@ -55,17 +55,83 @@ function normalizeOrigin(value: string | null | undefined) {
   }
 }
 
-export function isAllowedRequestOrigin(originHeader: string | null | undefined, siteUrl: string) {
+function isLikelyIpAddress(hostname: string) {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname) || hostname.includes(":");
+}
+
+function parseOriginList(value: string | null | undefined) {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((entry) => normalizeOrigin(entry.trim()))
+    .filter((entry): entry is string => Boolean(entry));
+}
+
+function addWwwApexVariant(origin: string, target: Set<string>) {
+  let url: URL;
+  try {
+    url = new URL(origin);
+  } catch {
+    return;
+  }
+
+  const host = url.hostname.toLowerCase();
+  if (host === "localhost" || isLikelyIpAddress(host)) {
+    return;
+  }
+
+  let alternateHost: string | null = null;
+  if (host.startsWith("www.")) {
+    alternateHost = host.slice(4);
+  } else if (host.split(".").length === 2) {
+    alternateHost = `www.${host}`;
+  }
+
+  if (!alternateHost) {
+    return;
+  }
+
+  url.hostname = alternateHost;
+  target.add(url.origin.toLowerCase());
+}
+
+function buildAllowedOrigins(siteUrl: string, extraAllowedOrigins?: string | null) {
+  const origins = new Set<string>();
+
+  const siteOrigin = normalizeOrigin(siteUrl);
+  if (siteOrigin) {
+    origins.add(siteOrigin);
+  }
+
+  for (const origin of parseOriginList(extraAllowedOrigins)) {
+    origins.add(origin);
+  }
+
+  for (const origin of [...origins]) {
+    addWwwApexVariant(origin, origins);
+  }
+
+  return origins;
+}
+
+export function isAllowedRequestOrigin(
+  originHeader: string | null | undefined,
+  siteUrl: string,
+  extraAllowedOrigins?: string | null
+) {
   if (!originHeader) {
     return true;
   }
 
   const requestOrigin = normalizeOrigin(originHeader);
-  const siteOrigin = normalizeOrigin(siteUrl);
-  if (!requestOrigin || !siteOrigin) {
+  const allowedOrigins = buildAllowedOrigins(siteUrl, extraAllowedOrigins);
+  if (!requestOrigin || allowedOrigins.size === 0) {
     return false;
   }
-  return requestOrigin === siteOrigin;
+  return allowedOrigins.has(requestOrigin);
 }
 
 export function shouldEnforceCheckoutOriginGuard() {
