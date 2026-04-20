@@ -42,6 +42,17 @@ function normalizeSiteUrl(url: string) {
   return url.replace(/\/+$/, "");
 }
 
+function normalizeOrigin(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+  try {
+    return new URL(value).origin;
+  } catch {
+    return null;
+  }
+}
+
 async function releasePreviousCheckoutReservation(
   stripe: Stripe,
   request: Request
@@ -202,14 +213,14 @@ export async function POST(request: Request) {
   }
 
   const { items, wantsJson } = parsed;
-  if (
-    shouldEnforceCheckoutOriginGuard() &&
-    !isAllowedRequestOrigin(
-      request.headers.get("origin"),
-      siteUrl,
-      process.env.CHECKOUT_ALLOWED_ORIGINS
-    )
-  ) {
+  const requestOriginHeader = request.headers.get("origin");
+  const originAllowed = isAllowedRequestOrigin(
+    requestOriginHeader,
+    siteUrl,
+    process.env.CHECKOUT_ALLOWED_ORIGINS
+  );
+
+  if (shouldEnforceCheckoutOriginGuard() && !originAllowed) {
     const errorMessage = "Invalid request origin";
     return wantsJson
       ? jsonResponse({ ok: false, error: errorMessage }, 403, rateLimitHeaders)
@@ -282,7 +293,8 @@ export async function POST(request: Request) {
     lineItems.push(lineItem);
   }
 
-  const baseUrl = normalizeSiteUrl(siteUrl);
+  const requestOrigin = normalizeOrigin(requestOriginHeader);
+  const baseUrl = requestOrigin && originAllowed ? normalizeSiteUrl(requestOrigin) : normalizeSiteUrl(siteUrl);
   const singleSlug = items.length === 1 ? items[0].slug : null;
   const successUrl = `${baseUrl}/checkout/success?session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = singleSlug
