@@ -37,6 +37,8 @@ type ParsedCheckoutRequest = {
 };
 
 type ShippingAllowedCountry = Stripe.Checkout.SessionCreateParams.ShippingAddressCollection.AllowedCountry;
+const MIN_CHECKOUT_UNIT_AMOUNT_CENTS = 50;
+const MAX_CHECKOUT_UNIT_AMOUNT_CENTS = 99_999_999;
 
 function normalizeSiteUrl(url: string) {
   return url.replace(/\/+$/, "");
@@ -182,6 +184,20 @@ function formatAvailabilityError(slug: string, available: number) {
   return `Only ${available} left for ${slug}`;
 }
 
+function formatInvalidPriceError(slug: string, priceCents: number) {
+  if (priceCents < MIN_CHECKOUT_UNIT_AMOUNT_CENTS) {
+    return `Product ${slug} has invalid price. Live checkout items must be at least $0.50.`;
+  }
+
+  return `Product ${slug} has invalid price. Adjust the admin price and try again.`;
+}
+
+function sanitizeCheckoutLineItemName(title: string, fallbackSlug: string) {
+  const raw = title.trim() || fallbackSlug.trim();
+  const maxLength = 120;
+  return raw.slice(0, maxLength) || fallbackSlug;
+}
+
 export async function POST(request: Request) {
   const rateLimit = await applyRateLimit(request, {
     namespace: "checkout",
@@ -274,6 +290,19 @@ export async function POST(request: Request) {
         : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
     }
 
+    const normalizedPriceCents = Math.max(0, Math.floor(product.priceCents || 0));
+    if (!product.priceId) {
+      if (
+        normalizedPriceCents < MIN_CHECKOUT_UNIT_AMOUNT_CENTS ||
+        normalizedPriceCents > MAX_CHECKOUT_UNIT_AMOUNT_CENTS
+      ) {
+        const errorMessage = formatInvalidPriceError(requested.slug, normalizedPriceCents);
+        return wantsJson
+          ? jsonResponse({ ok: false, error: errorMessage }, 400, rateLimitHeaders)
+          : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
+      }
+    }
+
     const lineItem = product.priceId
       ? {
           price: product.priceId,
@@ -283,10 +312,9 @@ export async function POST(request: Request) {
           quantity: requested.quantity,
           price_data: {
             currency: "usd",
-            unit_amount: product.priceCents,
+            unit_amount: normalizedPriceCents,
             product_data: {
-              name: product.title,
-              description: product.description || product.subtitle
+              name: sanitizeCheckoutLineItemName(product.title, requested.slug)
             }
           }
         };

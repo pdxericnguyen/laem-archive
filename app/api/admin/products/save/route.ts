@@ -20,6 +20,8 @@ type ProductPayload = {
   care: string;
   shippingReturns: string;
 };
+const MIN_CHECKOUT_UNIT_AMOUNT_CENTS = 50;
+const MAX_CHECKOUT_UNIT_AMOUNT_CENTS = 99_999_999;
 
 function normalizeStatus(value: unknown): ProductPayload["status"] | null {
   return value === "live" || value === "archived" || value === "hidden" ? value : null;
@@ -96,7 +98,7 @@ function buildRedirectUrl(
   request: Request,
   payload: ProductPayload,
   params?: {
-    saveError?: "slug_locked";
+    saveError?: "slug_locked" | "invalid_live_price";
     saveSlug?: string;
   }
 ) {
@@ -221,6 +223,36 @@ export async function POST(request: Request) {
     payload.status === "archived" || (payload.status === "live" && payload.autoArchiveOnZero && normalizedStock <= 0);
   const autoArchivedAt =
     payload.status === "live" && payload.autoArchiveOnZero && normalizedStock <= 0 ? Date.now() : undefined;
+  const wantsJson = wantsJsonResponse(request);
+
+  if (
+    payload.status === "live" &&
+    (normalizedPrice < MIN_CHECKOUT_UNIT_AMOUNT_CENTS || normalizedPrice > MAX_CHECKOUT_UNIT_AMOUNT_CENTS)
+  ) {
+    const message =
+      normalizedPrice < MIN_CHECKOUT_UNIT_AMOUNT_CENTS
+        ? "Live products must be priced at $0.50 or higher."
+        : "Product price is too high for Stripe checkout. Lower the price and try again.";
+
+    if (wantsJson) {
+      return Response.json(
+        {
+          ok: false,
+          error: message,
+          code: "invalid_live_price"
+        },
+        { status: 400 }
+      );
+    }
+
+    return Response.redirect(
+      buildRedirectUrl(request, payload, {
+        saveError: "invalid_live_price",
+        saveSlug: payload.slug
+      }),
+      303
+    );
+  }
 
   const product: Product = {
     slug: payload.slug,
@@ -293,7 +325,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const wantsJson = wantsJsonResponse(request);
   if (wantsJson) {
     return Response.json({ ok: true, product });
   }

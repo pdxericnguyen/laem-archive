@@ -27,7 +27,7 @@ type FilterOption = {
 };
 
 type DeleteErrorCode = "live" | "reserved";
-type SaveErrorCode = "slug_locked";
+type SaveErrorCode = "slug_locked" | "invalid_live_price";
 
 type ProductRow = {
   product: Product;
@@ -95,7 +95,7 @@ function parseDeleteErrorCode(value: string | string[] | undefined): DeleteError
 
 function parseSaveErrorCode(value: string | string[] | undefined): SaveErrorCode | null {
   const raw = typeof value === "string" ? value : Array.isArray(value) ? value[0] : "";
-  return raw === "slug_locked" ? raw : null;
+  return raw === "slug_locked" || raw === "invalid_live_price" ? raw : null;
 }
 
 function parseOptionalPositiveInt(value: string | string[] | undefined) {
@@ -243,7 +243,26 @@ function getDeleteErrorMessage(
 }
 
 function getSaveErrorMessage(saveError: SaveErrorCode | null, saveSlug: string | null) {
-  if (!saveError || !saveSlug) {
+  if (!saveError) {
+    return null;
+  }
+
+  if (saveError === "invalid_live_price") {
+    return (
+      <>
+        {saveSlug ? (
+          <>
+            <code>{saveSlug}</code> can&apos;t be set live with its current price.
+          </>
+        ) : (
+          <>That product can&apos;t be set live with its current price.</>
+        )}{" "}
+        Live products must be priced at <span className="font-semibold">$0.50 or higher</span>.
+      </>
+    );
+  }
+
+  if (!saveSlug) {
     return null;
   }
 
