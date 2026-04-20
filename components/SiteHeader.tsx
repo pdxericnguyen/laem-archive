@@ -4,6 +4,13 @@ import { useState } from "react";
 
 import { useCart } from "@/lib/cart";
 
+const SHOP_FILTER_LINKS = [
+  { href: "/shop", label: "All products" },
+  { href: "/shop?category=clothing", label: "Clothing" },
+  { href: "/shop?category=accessories", label: "Accessories" },
+  { href: "/shop?category=jewelry", label: "Jewelry" }
+];
+
 export default function SiteHeader() {
   const { itemCount } = useCart();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -20,7 +27,44 @@ export default function SiteHeader() {
         </a>
 
         <nav className="hidden md:flex items-center gap-6 text-sm">
-          <a href="/shop" className="hover:opacity-70 no-underline">Shop</a>
+          <div className="relative group">
+            <a
+              href="/shop"
+              className="inline-flex items-center gap-1 no-underline hover:opacity-70"
+              aria-haspopup="menu"
+            >
+              Shop
+              <svg
+                viewBox="0 0 20 20"
+                fill="none"
+                aria-hidden="true"
+                className="h-3 w-3 text-neutral-500 transition-transform duration-150 group-hover:rotate-180 group-focus-within:rotate-180"
+              >
+                <path
+                  d="M5 7.5L10 12.5L15 7.5"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </a>
+            <div className="pointer-events-none absolute left-0 top-full z-50 w-52 translate-y-1 pt-3 opacity-0 transition duration-150 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:opacity-100">
+              <div className="border border-neutral-200 bg-white p-1 shadow-lg">
+                {SHOP_FILTER_LINKS.map((link) => (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    className="flex h-9 items-center px-2 text-xs font-medium uppercase tracking-[0.08em] text-neutral-700 no-underline hover:bg-neutral-100"
+                    role="menuitem"
+                    onClick={() => setMobileOpen(false)}
+                  >
+                    {link.label}
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
           <a href="/archive" className="hover:opacity-70 no-underline">Archive</a>
           <a href="/about" className="hover:opacity-70 no-underline">About</a>
           <a href="/contact" className="hover:opacity-70 no-underline">Contact</a>

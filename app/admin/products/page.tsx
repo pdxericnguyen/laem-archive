@@ -1,6 +1,6 @@
 import { summarizeReservationHoldsForSlugs, type ReservationHoldSummary } from "@/lib/inventory";
 import { hasKvEnv, kv } from "@/lib/kv";
-import type { Product } from "@/lib/store";
+import type { Product, ProductCategory } from "@/lib/store";
 import AdminCommandPalette from "../command-palette";
 import AdminSystemHealthBanner from "../system-health-banner";
 import UnsavedChangesGuard from "../unsaved-changes-guard";
@@ -25,6 +25,12 @@ type FilterOption = {
   value: ProductFilterStatus;
   label: string;
 };
+
+const PRODUCT_CATEGORY_OPTIONS: Array<{ value: ProductCategory; label: string }> = [
+  { value: "clothing", label: "Clothing" },
+  { value: "accessories", label: "Accessories" },
+  { value: "jewelry", label: "Jewelry" }
+];
 
 type DeleteErrorCode = "live" | "reserved";
 type SaveErrorCode = "slug_locked" | "invalid_live_price";
@@ -439,6 +445,20 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
             <input name="subtitle" className="h-10 border border-neutral-300 px-3" />
           </label>
           <label className="grid gap-1">
+            <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Category</span>
+            <select
+              name="category"
+              defaultValue="jewelry"
+              className="h-10 border border-neutral-300 bg-white px-3"
+            >
+              {PRODUCT_CATEGORY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-1">
             <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Description</span>
             <textarea name="description" rows={3} className="border border-neutral-300 p-3" />
           </label>
@@ -604,6 +624,21 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                     className="h-10 border border-neutral-300 px-3"
                     defaultValue={product.subtitle}
                   />
+                </label>
+                <label className="grid gap-1">
+                  <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Category</span>
+                  <select
+                    name="category"
+                    defaultValue={product.category || ""}
+                    className="h-10 border border-neutral-300 bg-white px-3"
+                  >
+                    <option value="">Uncategorized</option>
+                    {PRODUCT_CATEGORY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="grid gap-1">
                   <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Description</span>

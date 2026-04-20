@@ -1,10 +1,13 @@
 import { hasKvEnv, key, kv } from "@/lib/kv";
 
+export type ProductCategory = "clothing" | "accessories" | "jewelry";
+
 export type Product = {
   slug: string;
   title: string;
   subtitle: string;
   description: string;
+  category?: ProductCategory;
   priceCents: number;
   stock: number;
   archived: boolean;
@@ -30,6 +33,13 @@ function asBoolean(value: unknown, fallback = false) {
   return typeof value === "boolean" ? value : fallback;
 }
 
+function asCategory(value: unknown): ProductCategory | undefined {
+  if (value === "clothing" || value === "accessories" || value === "jewelry") {
+    return value;
+  }
+  return undefined;
+}
+
 function asStringArray(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
@@ -52,12 +62,14 @@ function normalizeProduct(input: unknown): Product | null {
   const subtitle = asString(row.subtitle);
   const description = asString(row.description, subtitle);
   const autoArchivedAt = Math.max(0, Math.floor(asNumber(row.autoArchivedAt)));
+  const category = asCategory(row.category);
 
   const product: Product = {
     slug,
     title,
     subtitle,
     description,
+    category,
     priceCents: Math.max(0, Math.floor(asNumber(row.priceCents))),
     stock: Math.max(0, Math.floor(asNumber(row.stock))),
     archived: asBoolean(row.archived),

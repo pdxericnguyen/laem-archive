@@ -1,7 +1,9 @@
 import { setStock } from "@/lib/inventory";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
-import type { Product } from "@/lib/store";
+import type { Product, ProductCategory } from "@/lib/store";
+
+type ProductCategoryInput = ProductCategory | "";
 
 type ProductPayload = {
   slug: string;
@@ -10,6 +12,7 @@ type ProductPayload = {
   title: string;
   subtitle: string;
   description: string;
+  category: ProductCategoryInput;
   priceCents: number;
   stock: number;
   status: "live" | "archived" | "hidden";
@@ -80,6 +83,17 @@ function clampToNonNegativeInt(value: number) {
   return Math.max(0, Math.floor(value));
 }
 
+function normalizeCategory(value: unknown): ProductCategoryInput {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const raw = value.trim().toLowerCase();
+  if (raw === "clothing" || raw === "accessories" || raw === "jewelry") {
+    return raw;
+  }
+  return "";
+}
+
 function parseImages(value: FormDataEntryValue | null | undefined) {
   if (!value || typeof value !== "string") {
     return [];
@@ -144,6 +158,7 @@ async function getPayload(request: Request): Promise<ProductPayload | null> {
           : typeof body.subtitle === "string"
             ? body.subtitle
             : "",
+      category: normalizeCategory(body.category),
       priceCents: parsePriceFromBody(body),
       stock: typeof body.stock === "number" ? body.stock : Number(body.stock ?? 0),
       status:
@@ -186,6 +201,7 @@ async function getPayload(request: Request): Promise<ProductPayload | null> {
         : typeof formData.get("subtitle") === "string"
           ? String(formData.get("subtitle"))
           : "",
+    category: normalizeCategory(formData.get("category")),
     priceCents: parsePriceToCents(formData.get("price") ?? formData.get("priceCents")),
     stock: parseNumber(formData.get("stock")),
     status:
@@ -259,6 +275,7 @@ export async function POST(request: Request) {
     title: payload.title,
     subtitle: payload.subtitle,
     description: payload.description,
+    category: payload.category || undefined,
     priceCents: normalizedPrice,
     stock: normalizedStock,
     archived,
