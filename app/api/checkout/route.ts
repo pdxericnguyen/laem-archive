@@ -198,6 +198,33 @@ function sanitizeCheckoutLineItemName(title: string, fallbackSlug: string) {
   return raw.slice(0, maxLength) || fallbackSlug;
 }
 
+function getCheckoutSessionCreationErrorMessage(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return "Unable to create checkout session";
+  }
+
+  const stripeError = error as { type?: unknown; message?: unknown };
+  if (stripeError.type !== "StripeInvalidRequestError") {
+    return "Unable to create checkout session";
+  }
+
+  const message = typeof stripeError.message === "string" ? stripeError.message.trim() : "";
+  if (!message) {
+    return "Unable to create checkout session";
+  }
+
+  const normalized = message.toLowerCase();
+  if (
+    normalized.includes("line_items") ||
+    normalized.includes("price_data") ||
+    normalized.includes("product_data")
+  ) {
+    return "Product checkout data is invalid. Re-save the product title and price, then try again.";
+  }
+
+  return message.length > 220 ? `${message.slice(0, 220)}...` : message;
+}
+
 export async function POST(request: Request) {
   const rateLimit = await applyRateLimit(request, {
     namespace: "checkout",
@@ -359,14 +386,15 @@ export async function POST(request: Request) {
       })
     );
   } catch (error) {
+    const errorMessage = getCheckoutSessionCreationErrorMessage(error);
     console.error("Stripe checkout session creation failed", {
       error,
       items,
       siteUrl
     });
     return wantsJson
-      ? jsonResponse({ ok: false, error: "Unable to create checkout session" }, 500, rateLimitHeaders)
-      : new Response("Unable to create checkout session", { status: 500, headers: rateLimitHeaders });
+      ? jsonResponse({ ok: false, error: errorMessage }, 500, rateLimitHeaders)
+      : new Response(errorMessage, { status: 500, headers: rateLimitHeaders });
   }
 
   const reservation = await reserveInventoryForCheckoutSession(session.id, items, session.expires_at || expiresAt);
