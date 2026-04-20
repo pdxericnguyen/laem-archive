@@ -26,11 +26,11 @@ export default function SiteHeader() {
           LAEM Archive
         </a>
 
-        <nav className="hidden md:flex items-center gap-6 text-sm">
+        <nav className="hidden md:flex items-center gap-5 text-sm">
           <div className="relative group">
             <a
               href="/shop"
-              className="inline-flex items-center gap-1 no-underline hover:opacity-70"
+              className="inline-flex items-center no-underline hover:opacity-70"
               aria-haspopup="menu"
             >
               Shop
@@ -38,7 +38,7 @@ export default function SiteHeader() {
                 viewBox="0 0 20 20"
                 fill="none"
                 aria-hidden="true"
-                className="h-3 w-3 text-neutral-500 transition-transform duration-150 group-hover:rotate-180 group-focus-within:rotate-180"
+                className="ml-0.5 h-2.5 w-2.5 text-neutral-500 transition-transform duration-150 group-hover:rotate-180 group-focus-within:rotate-180"
               >
                 <path
                   d="M5 7.5L10 12.5L15 7.5"
