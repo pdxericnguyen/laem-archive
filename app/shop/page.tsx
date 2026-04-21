@@ -105,6 +105,13 @@ function buildShopHref(category: CategoryFilter, availability: AvailabilityFilte
   return query ? `/shop?${query}` : "/shop";
 }
 
+function buildCategoryHref(category: CategoryFilter, availability: AvailabilityFilter) {
+  if (category === "all") {
+    return "/shop";
+  }
+  return buildShopHref(category, availability);
+}
+
 function filterActiveClass(active: boolean) {
   if (active) {
     return "border-neutral-900 bg-neutral-900 text-white";
@@ -151,7 +158,7 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
           {CATEGORY_OPTIONS.map((option) => (
             <a
               key={option.value}
-              href={buildShopHref(option.value, activeFilter)}
+              href={buildCategoryHref(option.value, activeFilter)}
               className={`inline-flex h-8 items-center border px-3 text-[11px] font-semibold uppercase tracking-[0.1em] no-underline ${filterActiveClass(
                 activeCategory === option.value
               )}`}
