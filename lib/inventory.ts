@@ -472,10 +472,33 @@ export async function getAvailableStockForSlugs(slugs: string[]): Promise<Record
 
   await maybeCleanupExpiredReservationsForStorefront();
 
-  const [stockRows, reservedRows] = await Promise.all([
-    Promise.all(uniqueSlugs.map(async (slug) => [slug, await getStock(slug)] as const)),
-    Promise.all(uniqueSlugs.map(async (slug) => [slug, await getReservedStock(slug)] as const))
-  ]);
+  const stockKeys = uniqueSlugs.map((slug) => key.stock(slug));
+  const reservedKeys = uniqueSlugs.map((slug) => key.reserved(slug));
+
+  // Batch KV lookups to reduce storefront latency on larger catalogs.
+  const batchedStockValues = await kv.mget<unknown[]>(...stockKeys);
+  const batchedReservedValues = await kv.mget<unknown[]>(...reservedKeys);
+
+  const stockRows = await Promise.all(
+    uniqueSlugs.map(async (slug, index) => {
+      const rawValue = batchedStockValues[index];
+      if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+        return [slug, Math.max(0, Math.floor(rawValue))] as const;
+      }
+      return [slug, await getStock(slug)] as const;
+    })
+  );
+
+  const reservedRows = await Promise.all(
+    uniqueSlugs.map(async (slug, index) => {
+      const rawValue = batchedReservedValues[index];
+      if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
+        return [slug, Math.max(0, Math.floor(rawValue))] as const;
+      }
+      return [slug, await getReservedStock(slug)] as const;
+    })
+  );
+
   const reservedBySlug = Object.fromEntries(reservedRows) as Record<string, number>;
 
   return Object.fromEntries(
