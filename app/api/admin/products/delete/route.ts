@@ -1,6 +1,6 @@
 import { del as deleteBlob } from "@vercel/blob";
 
-import { summarizeReservationHoldsForSlugs } from "@/lib/inventory";
+import { deleteStockForSlug, summarizeReservationHoldsForSlugs } from "@/lib/inventory";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import type { Product } from "@/lib/store";
@@ -199,9 +199,9 @@ export async function POST(request: Request) {
   }
 
   const nextProducts = products.filter((item) => item.slug !== payload.slug);
+  await deleteStockForSlug(payload.slug);
   await kv.set(key.products, nextProducts);
   await kv.del(key.product(payload.slug));
-  await kv.del(key.stock(payload.slug));
   await kv.del(key.published(payload.slug));
   await kv.del(key.archived(payload.slug));
   await rebuildProductsIndex(nextProducts);

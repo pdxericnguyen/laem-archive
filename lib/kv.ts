@@ -45,7 +45,7 @@ export const key = {
   product: (slug: string) => `product:${slug}`,
   products: "products",
   productsIndex: "products:index",
-  stock: (slug: string) => `stock:${slug}`,
+  stock: (inventoryItemId: string) => `stock:${inventoryItemId}`,
   reserved: (slug: string) => `reserved:${slug}`,
   order: (id: string) => `order:${id}`,
   orderProcessingLock: (id: string) => `order:processing:${id}`,

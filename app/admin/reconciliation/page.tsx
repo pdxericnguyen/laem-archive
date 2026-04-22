@@ -139,9 +139,9 @@ export default async function AdminReconciliationPage({ searchParams }: AdminRec
   const productStates: ReconciliationProductState[] = products.map((product) => ({
     slug: product.slug,
     title: product.title,
-    stock: product.stock,
     published: product.published,
     archived: product.archived,
+    hasInventoryItemId: typeof product.inventoryItemId === "string" && product.inventoryItemId.trim().length > 0,
     stockKey: stockBySlug[product.slug] || 0,
     holdSummary: holdSummariesBySlug[product.slug] || {
       reservedStock: 0,
@@ -189,8 +189,8 @@ export default async function AdminReconciliationPage({ searchParams }: AdminRec
           <p className="mt-1 text-xl font-semibold text-neutral-900">{summary.activeHeldUnits}</p>
         </div>
         <div className="border border-neutral-200 p-3">
-          <p className="text-[11px] uppercase tracking-[0.12em] text-neutral-500">Stock Mismatches</p>
-          <p className="mt-1 text-xl font-semibold text-neutral-900">{summary.stockSnapshotMismatches.length}</p>
+          <p className="text-[11px] uppercase tracking-[0.12em] text-neutral-500">Missing Inv IDs</p>
+          <p className="mt-1 text-xl font-semibold text-neutral-900">{summary.missingInventoryIdentities.length}</p>
         </div>
       </section>
 

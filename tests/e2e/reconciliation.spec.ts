@@ -4,6 +4,7 @@ import {
   describeInventoryLedgerEvent,
   normalizeInventoryLedgerEvent
 } from "../../lib/inventory-ledger";
+import { getProductInventoryItemId } from "../../lib/inventory";
 import { buildReconciliationSummary } from "../../lib/reconciliation";
 
 test("inventory ledger events normalize into operator-readable rows", () => {
@@ -35,7 +36,24 @@ test("inventory ledger events normalize into operator-readable rows", () => {
   expect(describeInventoryLedgerEvent(event!)).toBe("Web sale completed");
 });
 
-test("reconciliation summary flags missing orders and stock mismatches", () => {
+test("inventory identity requires a stable inventory id", () => {
+  expect(
+    getProductInventoryItemId(
+      {
+        inventoryItemId: "original-inventory-id"
+      }
+    )
+  ).toBe("original-inventory-id");
+
+  expect(
+    getProductInventoryItemId(
+      {
+      }
+    )
+  ).toBeNull();
+});
+
+test("reconciliation summary flags missing orders and missing inventory identities", () => {
   const summary = buildReconciliationSummary({
     orders: [
       {
@@ -66,8 +84,8 @@ test("reconciliation summary flags missing orders and stock mismatches", () => {
       {
         slug: "ring-01",
         title: "Ring 01",
-        stock: 2,
         stockKey: 1,
+        hasInventoryItemId: false,
         published: true,
         archived: false,
         holdSummary: {
@@ -81,7 +99,7 @@ test("reconciliation summary flags missing orders and stock mismatches", () => {
 
   expect(summary.missingOrderPayments).toHaveLength(1);
   expect(summary.stockConflicts).toHaveLength(1);
-  expect(summary.stockSnapshotMismatches).toHaveLength(1);
+  expect(summary.missingInventoryIdentities).toHaveLength(1);
   expect(summary.activeHeldUnits).toBe(1);
   expect(summary.issues.map((issue) => issue.severity)).toEqual(["high", "high", "medium", "low"]);
 });

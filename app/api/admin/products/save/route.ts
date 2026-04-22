@@ -1,4 +1,11 @@
-import { getStock, setStock, summarizeReservationHoldsForSlugs } from "@/lib/inventory";
+import { randomUUID } from "node:crypto";
+
+import {
+  getProductInventoryItemId,
+  getStock,
+  setStock,
+  summarizeReservationHoldsForSlugs
+} from "@/lib/inventory";
 import { recordInventoryLedgerEvent } from "@/lib/inventory-ledger";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
@@ -82,6 +89,10 @@ function clampToNonNegativeInt(value: number) {
     return 0;
   }
   return Math.max(0, Math.floor(value));
+}
+
+function createInventoryItemId() {
+  return `inv_${randomUUID().replaceAll("-", "")}`;
 }
 
 function normalizeCategory(value: unknown): ProductCategoryInput {
@@ -271,14 +282,25 @@ export async function POST(request: Request) {
     );
   }
 
+  const existing = await kv.get<Product[]>(key.products);
+  const products = Array.isArray(existing) ? existing : [];
+  const originalSlug = payload.originalSlug || payload.slug;
+  const index = products.findIndex((item) => item.slug === originalSlug);
+  const directExisting = await kv.get<Product>(key.product(originalSlug));
+  const existingProduct = index >= 0 ? products[index] : directExisting || null;
+  const previousStock = existingProduct ? await getStock(originalSlug) : null;
+  const inventoryItemId = existingProduct
+    ? getProductInventoryItemId(existingProduct) || createInventoryItemId()
+    : createInventoryItemId();
+
   const product: Product = {
     slug: payload.slug,
+    inventoryItemId,
     title: payload.title,
     subtitle: payload.subtitle,
     description: payload.description,
     category: payload.category || undefined,
     priceCents: normalizedPrice,
-    stock: normalizedStock,
     archived,
     autoArchivedAt,
     published,
@@ -290,12 +312,6 @@ export async function POST(request: Request) {
     shippingReturns: payload.shippingReturns
   };
 
-  const existing = await kv.get<Product[]>(key.products);
-  const products = Array.isArray(existing) ? existing : [];
-  const originalSlug = payload.originalSlug || product.slug;
-  const index = products.findIndex((item) => item.slug === originalSlug);
-  const existingProduct = index >= 0 ? products[index] : null;
-  const previousStock = existingProduct ? await getStock(originalSlug) : null;
   const isRenaming = originalSlug !== product.slug;
   const isOriginalLive = Boolean(existingProduct?.published) && !Boolean(existingProduct?.archived);
   if (isOriginalLive && isRenaming) {
@@ -380,17 +396,17 @@ export async function POST(request: Request) {
 
   await kv.set(key.products, products);
   await kv.set(key.product(product.slug), product);
-  await setStock(product.slug, product.stock);
-  if ((previousStock ?? 0) !== product.stock) {
+  await setStock(product.slug, normalizedStock);
+  if ((previousStock ?? 0) !== normalizedStock) {
     await recordInventoryLedgerEvent({
       slug: product.slug,
       kind: "stock_adjusted",
       source: "admin",
       referenceId: product.slug,
-      quantity: Math.abs(product.stock - (previousStock ?? 0)),
+      quantity: Math.abs(normalizedStock - (previousStock ?? 0)),
       stockBefore: previousStock ?? 0,
-      stockAfter: product.stock,
-      stockDelta: product.stock - (previousStock ?? 0),
+      stockAfter: normalizedStock,
+      stockDelta: normalizedStock - (previousStock ?? 0),
       note: existingProduct ? "Product saved in admin." : "Product created in admin."
     });
   }
@@ -398,7 +414,6 @@ export async function POST(request: Request) {
   await kv.set(key.archived(product.slug), product.archived);
   if (originalSlug !== product.slug) {
     await kv.del(key.product(originalSlug));
-    await kv.del(key.stock(originalSlug));
     await kv.del(key.published(originalSlug));
     await kv.del(key.archived(originalSlug));
   }

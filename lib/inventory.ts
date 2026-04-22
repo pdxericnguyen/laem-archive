@@ -21,23 +21,74 @@ export async function getProduct(slug: string): Promise<ProductRecord | null> {
   return products.find((product) => product.slug === slug) || null;
 }
 
-export async function getStock(slug: string): Promise<number> {
-  const stock = await kv.get<number>(key.stock(slug));
-  if (typeof stock === "number") {
-    return Math.max(0, Math.floor(stock));
+function normalizeStockValue(value: unknown) {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (!Number.isFinite(parsed)) {
+    return null;
   }
+  return Math.max(0, Math.floor(parsed));
+}
 
+function normalizeInventoryItemId(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function getProductInventoryItemId(
+  product: Pick<ProductRecord, "inventoryItemId"> | null | undefined
+) {
+  return normalizeInventoryItemId(product?.inventoryItemId) || null;
+}
+
+export async function getInventoryItemIdForSlug(slug: string) {
   const product = await getProduct(slug);
-  if (!product) {
+  return getProductInventoryItemId(product);
+}
+
+async function getStockKeyForSlug(slug: string, product?: ProductRecord | null) {
+  const resolvedProduct = product === undefined ? await getProduct(slug) : product;
+  const inventoryItemId = getProductInventoryItemId(resolvedProduct);
+  return inventoryItemId ? key.stock(inventoryItemId) : null;
+}
+
+async function getRequiredStockKeyForSlug(slug: string, product?: ProductRecord | null) {
+  const stockKey = await getStockKeyForSlug(slug, product);
+  if (!stockKey) {
+    throw new Error(`Product ${slug} is missing inventoryItemId.`);
+  }
+  return stockKey;
+}
+
+export async function getInventoryStockKeyForSlug(slug: string) {
+  return getStockKeyForSlug(slug);
+}
+
+export async function deleteStockForSlug(slug: string) {
+  const product = await getProduct(slug);
+  const stockKey = await getStockKeyForSlug(slug, product);
+  if (stockKey) {
+    await kv.del(stockKey);
+  }
+}
+
+export async function getStock(slug: string): Promise<number> {
+  const product = await getProduct(slug);
+  const stockKey = await getStockKeyForSlug(slug, product);
+  if (!stockKey) {
     return 0;
   }
 
-  return Math.max(0, Math.floor(product.stock));
+  const stock = normalizeStockValue(await kv.get<number>(stockKey));
+  if (stock !== null) {
+    return stock;
+  }
+
+  return 0;
 }
 
 export async function setStock(slug: string, nextValue: number) {
   const stock = Math.max(0, Math.floor(nextValue));
-  await kv.set(key.stock(slug), stock);
+  const stockKey = await getRequiredStockKeyForSlug(slug);
+  await kv.set(stockKey, stock);
 }
 
 async function updateProductSnapshot(
@@ -82,7 +133,6 @@ export async function syncProductStockAndArchiveState(slug: string, stockValue: 
 
     return {
       ...product,
-      stock,
       archived: shouldAutoArchive ? true : shouldRestoreFromAutoArchive ? false : Boolean(product.archived),
       autoArchivedAt: nextAutoArchivedAt
     };
@@ -126,18 +176,22 @@ export async function listSlugs(): Promise<string[]> {
 export async function decrementStock(slug: string, quantity: number) {
   const q = Math.max(1, Math.floor(quantity));
   const current = await getStock(slug);
+  const stockKey = await getInventoryStockKeyForSlug(slug);
+  if (!stockKey) {
+    return { current, next: current };
+  }
 
   if (typeof kv.incrby === "function") {
-    const next = await kv.incrby(key.stock(slug), -q);
+    const next = await kv.incrby(stockKey, -q);
     if (typeof next === "number" && next < 0) {
-      await kv.set(key.stock(slug), 0);
+      await kv.set(stockKey, 0);
       return { current, next: 0 };
     }
     return { current, next: typeof next === "number" ? next : Math.max(0, current - q) };
   }
 
   const next = Math.max(0, current - q);
-  await kv.set(key.stock(slug), next);
+  await kv.set(stockKey, next);
   return { current, next };
 }
 
@@ -339,15 +393,19 @@ async function recordReservationCompletedEvents(
 }
 
 async function ensureStockKey(slug: string) {
-  const existing = await kv.get<number>(key.stock(slug));
-  if (typeof existing === "number" && Number.isFinite(existing)) {
-    return Math.max(0, Math.floor(existing));
+  const product = await getProduct(slug);
+  const stockKey = await getStockKeyForSlug(slug, product);
+  if (!stockKey) {
+    return 0;
   }
 
-  const product = await getProduct(slug);
-  const baseline = Math.max(0, Math.floor(product?.stock || 0));
-  await kv.set(key.stock(slug), baseline);
-  return baseline;
+  const existing = normalizeStockValue(await kv.get<number>(stockKey));
+  if (existing !== null) {
+    return existing;
+  }
+
+  await kv.set(stockKey, 0);
+  return 0;
 }
 
 function normalizeReservationStatus(value: unknown): CheckoutReservationStatus | null {
@@ -421,11 +479,11 @@ export async function readInventoryReservation(sessionId: string): Promise<Check
 }
 
 export async function getReservedStock(slug: string): Promise<number> {
-  const reserved = await kv.get<number>(key.reserved(slug));
-  if (typeof reserved !== "number" || !Number.isFinite(reserved)) {
+  const reserved = normalizeStockValue(await kv.get<number>(key.reserved(slug)));
+  if (reserved === null) {
     return 0;
   }
-  return Math.max(0, Math.floor(reserved));
+  return reserved;
 }
 
 export async function summarizeReservationHoldsForSlugs(
@@ -539,28 +597,37 @@ export async function getAvailableStockForSlugs(slugs: string[]): Promise<Record
 
   await maybeCleanupExpiredReservationsForStorefront();
 
-  const stockKeys = uniqueSlugs.map((slug) => key.stock(slug));
+  const stockKeyRows = await Promise.all(
+    uniqueSlugs.map(async (slug) => ({
+      slug,
+      stockKey: await getInventoryStockKeyForSlug(slug)
+    }))
+  );
+  const validStockKeyRows = stockKeyRows.filter(
+    (row): row is { slug: string; stockKey: string } => Boolean(row.stockKey)
+  );
   const reservedKeys = uniqueSlugs.map((slug) => key.reserved(slug));
 
   // Batch KV lookups to reduce storefront latency on larger catalogs.
-  const batchedStockValues = await kv.mget<unknown[]>(...stockKeys);
+  const batchedStockValues =
+    validStockKeyRows.length > 0
+      ? await kv.mget<unknown[]>(...validStockKeyRows.map((row) => row.stockKey))
+      : [];
   const batchedReservedValues = await kv.mget<unknown[]>(...reservedKeys);
 
-  const stockRows = await Promise.all(
-    uniqueSlugs.map(async (slug, index) => {
-      const rawValue = batchedStockValues[index];
-      if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
-        return [slug, Math.max(0, Math.floor(rawValue))] as const;
-      }
-      return [slug, await getStock(slug)] as const;
-    })
+  const stockBySlug = Object.fromEntries(
+    validStockKeyRows.map((row, index) => [
+      row.slug,
+      normalizeStockValue(batchedStockValues[index]) ?? 0
+    ])
   );
+  const stockRows = uniqueSlugs.map((slug) => [slug, stockBySlug[slug] || 0] as const);
 
   const reservedRows = await Promise.all(
     uniqueSlugs.map(async (slug, index) => {
-      const rawValue = batchedReservedValues[index];
-      if (typeof rawValue === "number" && Number.isFinite(rawValue)) {
-        return [slug, Math.max(0, Math.floor(rawValue))] as const;
+      const reserved = normalizeStockValue(batchedReservedValues[index]);
+      if (reserved !== null) {
+        return [slug, reserved] as const;
       }
       return [slug, await getReservedStock(slug)] as const;
     })
@@ -598,6 +665,16 @@ export async function reserveInventoryForCheckoutSession(
 
   for (const request of requests) {
     await ensureStockKey(request.slug);
+  }
+  const stockKeys = await Promise.all(requests.map((request) => getInventoryStockKeyForSlug(request.slug)));
+  const missingStockKeyIndex = stockKeys.findIndex((stockKey) => !stockKey);
+  if (missingStockKeyIndex >= 0) {
+    return {
+      ok: false,
+      reason: "insufficient_stock",
+      failedSlug: requests[missingStockKeyIndex]?.slug,
+      available: 0
+    };
   }
 
   const createdAt = Math.floor(Date.now() / 1000);
@@ -648,7 +725,7 @@ return {1, 0, 0}
 `;
 
   const keys = [
-    ...requests.map((request) => key.stock(request.slug)),
+    ...(stockKeys as string[]),
     ...requests.map((request) => key.reserved(request.slug)),
     key.reservation(sessionId),
     key.reservationsExpiring
@@ -847,6 +924,27 @@ export async function consumeInventoryReservation(
   for (const item of reservation.items) {
     await ensureStockKey(item.slug);
   }
+  const stockKeys = await Promise.all(
+    reservation.items.map((item) => getInventoryStockKeyForSlug(item.slug))
+  );
+  const missingStockKeyIndex = stockKeys.findIndex((stockKey) => !stockKey);
+  if (missingStockKeyIndex >= 0) {
+    const item = reservation.items[missingStockKeyIndex];
+    return {
+      ok: false,
+      source: "reservation",
+      reason: "insufficient_stock",
+      failedSlug: item?.slug,
+      items: item
+        ? [
+            {
+              slug: item.slug,
+              ...toResult(item.quantity, false, 0, 0, "insufficient_stock")
+            }
+          ]
+        : []
+    };
+  }
 
   const updatedAt = Math.floor(Date.now() / 1000);
   const script = `
@@ -899,7 +997,7 @@ return out
   const keys = [
     key.reservation(sessionId),
     key.reservationsExpiring,
-    ...reservation.items.map((item) => key.stock(item.slug)),
+    ...(stockKeys as string[]),
     ...reservation.items.map((item) => key.reserved(item.slug))
   ];
   const args = [
@@ -940,7 +1038,7 @@ return out
     const currentReserved = await getReservedStock(item.slug);
     const nextStock = Math.max(0, currentStock - item.quantity);
     const nextReserved = Math.max(0, currentReserved - item.quantity);
-    await kv.set(key.stock(item.slug), nextStock);
+    await setStock(item.slug, nextStock);
     await kv.set(key.reserved(item.slug), nextReserved);
     items.push({
       slug: item.slug,
@@ -987,6 +1085,10 @@ export async function decrementStockAtomic(slug: string, quantity: number): Prom
   }
 
   await ensureStockKey(slug);
+  const stockKey = await getInventoryStockKeyForSlug(slug);
+  if (!stockKey) {
+    return toResult(requested, false, 0, 0, "insufficient_stock");
+  }
   const script = `
 local key = KEYS[1]
 local qty = tonumber(ARGV[1]) or 0
@@ -1013,7 +1115,7 @@ return {1, current, next}
 `;
 
   try {
-    const response = (await kv.eval(script, [key.stock(slug)], [String(requested)])) as unknown;
+    const response = (await kv.eval(script, [stockKey], [String(requested)])) as unknown;
     if (Array.isArray(response)) {
       const ok = parseNumberResult(response[0]) === 1;
       const current = Math.max(0, Math.floor(parseNumberResult(response[1])));
@@ -1028,19 +1130,19 @@ return {1, current, next}
   }
 
   if (typeof kv.incrby === "function") {
-    const after = await kv.incrby(key.stock(slug), -requested);
+    const after = await kv.incrby(stockKey, -requested);
     const rawNext = Math.floor(parseNumberResult(after));
     const next = Math.max(0, rawNext);
     const current = next + requested;
 
     if (rawNext < 0 || current < requested) {
-      await kv.incrby(key.stock(slug), requested);
+      await kv.incrby(stockKey, requested);
       const restored = await getStock(slug);
       return toResult(requested, false, restored, restored, "insufficient_stock");
     }
 
     if (next === 0) {
-      await kv.set(key.stock(slug), 0);
+      await kv.set(stockKey, 0);
     }
     return toResult(requested, true, current, next);
   }
@@ -1050,7 +1152,7 @@ return {1, current, next}
     return toResult(requested, false, current, current, "insufficient_stock");
   }
   const next = current - requested;
-  await kv.set(key.stock(slug), next);
+  await kv.set(stockKey, next);
   return toResult(requested, true, current, next);
 }
 
@@ -1082,7 +1184,24 @@ export async function decrementMultipleStockAtomic(
     await ensureStockKey(request.slug);
   }
 
-  const keys = requests.map((request) => key.stock(request.slug));
+  const keys = await Promise.all(requests.map((request) => getInventoryStockKeyForSlug(request.slug)));
+  const missingStockKeyIndex = keys.findIndex((stockKey) => !stockKey);
+  if (missingStockKeyIndex >= 0) {
+    const request = requests[missingStockKeyIndex];
+    return {
+      ok: false,
+      reason: "insufficient_stock",
+      failedSlug: request?.slug,
+      items: request
+        ? [
+            {
+              slug: request.slug,
+              ...toResult(request.quantity, false, 0, 0, "insufficient_stock")
+            }
+          ]
+        : []
+    };
+  }
   const args = requests.map((request) => String(request.quantity));
   const script = `
 for i = 1, #KEYS do
@@ -1118,7 +1237,7 @@ return out
 `;
 
   try {
-    const response = (await kv.eval(script, keys, args)) as unknown;
+    const response = (await kv.eval(script, keys as string[], args)) as unknown;
     if (Array.isArray(response) && response.length > 0) {
       const ok = parseNumberResult(response[0]) === 1;
       if (!ok) {

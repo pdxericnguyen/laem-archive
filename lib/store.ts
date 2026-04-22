@@ -4,12 +4,12 @@ export type ProductCategory = "clothing" | "accessories" | "jewelry";
 
 export type Product = {
   slug: string;
+  inventoryItemId?: string;
   title: string;
   subtitle: string;
   description: string;
   category?: ProductCategory;
   priceCents: number;
-  stock: number;
   archived: boolean;
   autoArchivedAt?: number;
   published: boolean;
@@ -61,17 +61,18 @@ function normalizeProduct(input: unknown): Product | null {
 
   const subtitle = asString(row.subtitle);
   const description = asString(row.description, subtitle);
+  const inventoryItemId = asString(row.inventoryItemId).trim();
   const autoArchivedAt = Math.max(0, Math.floor(asNumber(row.autoArchivedAt)));
   const category = asCategory(row.category);
 
   const product: Product = {
     slug,
+    inventoryItemId: inventoryItemId || undefined,
     title,
     subtitle,
     description,
     category,
     priceCents: Math.max(0, Math.floor(asNumber(row.priceCents))),
-    stock: Math.max(0, Math.floor(asNumber(row.stock))),
     archived: asBoolean(row.archived),
     published: asBoolean(row.published),
     autoArchiveOnZero: asBoolean(row.autoArchiveOnZero),

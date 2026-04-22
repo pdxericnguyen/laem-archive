@@ -1,4 +1,4 @@
-import { summarizeReservationHoldsForSlugs, type ReservationHoldSummary } from "@/lib/inventory";
+import { getStock, summarizeReservationHoldsForSlugs, type ReservationHoldSummary } from "@/lib/inventory";
 import { hasKvEnv, kv } from "@/lib/kv";
 import type { Product, ProductCategory } from "@/lib/store";
 import AdminCommandPalette from "../command-palette";
@@ -37,6 +37,7 @@ type SaveErrorCode = "slug_locked" | "slug_reserved" | "slug_taken" | "invalid_l
 
 type ProductRow = {
   product: Product;
+  stock: number;
   holdSummary: ReservationHoldSummary;
 };
 
@@ -51,16 +52,16 @@ function getProductStatus(product: Product): ProductStatus {
   return product.archived ? "archived" : "live";
 }
 
-function getProductFilterStatus(product: Product): Exclude<ProductFilterStatus, "all"> {
+function getProductFilterStatus(product: Product, stock: number): Exclude<ProductFilterStatus, "all"> {
   const status = getProductStatus(product);
   if (status === "hidden" || status === "archived") {
     return status;
   }
-  return product.stock <= 0 ? "sold-out" : "live";
+  return stock <= 0 ? "sold-out" : "live";
 }
 
-function getProductStatusBadge(product: Product): ProductStatusBadge {
-  const status = getProductFilterStatus(product);
+function getProductStatusBadge(product: Product, stock: number): ProductStatusBadge {
+  const status = getProductFilterStatus(product, stock);
 
   if (status === "hidden") {
     return {
@@ -76,7 +77,7 @@ function getProductStatusBadge(product: Product): ProductStatusBadge {
     };
   }
 
-  if (product.stock <= 0) {
+  if (stock <= 0) {
     return {
       label: "Sold out",
       className: "border-rose-300 bg-rose-50 text-rose-800"
@@ -323,9 +324,14 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
   }
 
   const products = await getProducts();
-  const holdSummariesBySlug = await summarizeReservationHoldsForSlugs(products.map((product) => product.slug));
+  const [holdSummariesBySlug, stockRows] = await Promise.all([
+    summarizeReservationHoldsForSlugs(products.map((product) => product.slug)),
+    Promise.all(products.map(async (product) => [product.slug, await getStock(product.slug)] as const))
+  ]);
+  const stockBySlug = Object.fromEntries(stockRows);
   const productRows: ProductRow[] = products.map((product) => ({
     product,
+    stock: stockBySlug[product.slug] || 0,
     holdSummary: holdSummariesBySlug[product.slug] || {
       reservedStock: 0,
       activeCheckoutCount: 0
@@ -362,15 +368,15 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
   ];
   const filterCounts = {
     all: productRows.length,
-    live: productRows.filter(({ product }) => getProductFilterStatus(product) === "live").length,
-    "sold-out": productRows.filter(({ product }) => getProductFilterStatus(product) === "sold-out").length,
-    archived: productRows.filter(({ product }) => getProductFilterStatus(product) === "archived").length,
-    hidden: productRows.filter(({ product }) => getProductFilterStatus(product) === "hidden").length
+    live: productRows.filter(({ product, stock }) => getProductFilterStatus(product, stock) === "live").length,
+    "sold-out": productRows.filter(({ product, stock }) => getProductFilterStatus(product, stock) === "sold-out").length,
+    archived: productRows.filter(({ product, stock }) => getProductFilterStatus(product, stock) === "archived").length,
+    hidden: productRows.filter(({ product, stock }) => getProductFilterStatus(product, stock) === "hidden").length
   };
   const filteredRows =
     activeFilter === "all"
       ? productRows
-      : productRows.filter(({ product }) => getProductFilterStatus(product) === activeFilter);
+      : productRows.filter(({ product, stock }) => getProductFilterStatus(product, stock) === activeFilter);
   const activeFilterLabel = filterOptions.find((option) => option.value === activeFilter)?.label || "All";
 
   return (
@@ -444,10 +450,10 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
       </section>
 
       <BulkStockEditor
-        rows={filteredRows.map(({ product }) => ({
+        rows={filteredRows.map(({ product, stock }) => ({
           slug: product.slug,
           title: product.title,
-          stock: product.stock
+          stock
         }))}
       />
 
@@ -558,8 +564,8 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
             {activeFilter === "all" ? "No products yet." : `No ${activeFilterLabel.toLowerCase()} products yet.`}
           </div>
         ) : (
-          filteredRows.map(({ product, holdSummary }) => {
-            const statusBadge = getProductStatusBadge(product);
+          filteredRows.map(({ product, stock, holdSummary }) => {
+            const statusBadge = getProductStatusBadge(product, stock);
             const productStatus = getProductStatus(product);
             const slugLocked = productStatus === "live";
             const deleteBlockedByLive = productStatus === "live";
@@ -699,7 +705,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                       min="0"
                       step="1"
                       className="h-10 border border-neutral-300 px-3"
-                      defaultValue={product.stock}
+                      defaultValue={stock}
                     />
                   </label>
                 </div>

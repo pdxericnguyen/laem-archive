@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "test:e2e": "playwright test",
-    "env:audit": "node scripts/env-audit.mjs"
+    "env:audit": "node scripts/env-audit.mjs",
+    "reset:test-data": "node scripts/reset-test-data.mjs"
   },
   "dependencies": {
     "@upstash/redis": "^1.36.2",

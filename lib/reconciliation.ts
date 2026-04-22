@@ -13,7 +13,8 @@ export type ReconciliationStripePayment = {
   dashboardUrl: string;
 };
 
-export type ReconciliationProductState = Pick<Product, "slug" | "title" | "stock" | "published" | "archived"> & {
+export type ReconciliationProductState = Pick<Product, "slug" | "title" | "published" | "archived"> & {
+  hasInventoryItemId: boolean;
   stockKey: number;
   holdSummary: ReservationHoldSummary;
 };
@@ -33,7 +34,7 @@ export type ReconciliationSummary = {
   activeHeldUnits: number;
   missingOrderPayments: ReconciliationStripePayment[];
   stockConflicts: OrderRecord[];
-  stockSnapshotMismatches: ReconciliationProductState[];
+  missingInventoryIdentities: ReconciliationProductState[];
   lowStockProducts: ReconciliationProductState[];
   issues: ReconciliationIssue[];
 };
@@ -114,7 +115,7 @@ export function buildReconciliationSummary(input: {
   const orderIds = new Set(input.orders.map((order) => order.id));
   const missingOrderPayments = input.stripePayments.filter((payment) => !orderIds.has(payment.id));
   const stockConflicts = input.orders.filter((order) => order.status === "stock_conflict");
-  const stockSnapshotMismatches = input.products.filter((product) => product.stock !== product.stockKey);
+  const missingInventoryIdentities = input.products.filter((product) => !product.hasInventoryItemId);
   const lowStockProducts = input.products.filter(
     (product) =>
       product.published &&
@@ -146,11 +147,11 @@ export function buildReconciliationSummary(input: {
       detail: `${order.id} could not fully decrement stock. Resolve before fulfillment.`,
       href: `/admin/orders?queue=conflicts`
     })),
-    ...stockSnapshotMismatches.map((product) => ({
-      id: `stock-mismatch-${product.slug}`,
+    ...missingInventoryIdentities.map((product) => ({
+      id: `missing-inventory-id-${product.slug}`,
       severity: "medium" as const,
-      label: "Product stock snapshot mismatch",
-      detail: `${product.slug} shows ${product.stock} on product data but ${product.stockKey} in the live stock key.`,
+      label: "Product missing inventory identity",
+      detail: `${product.slug} does not have an inventoryItemId, so it is unavailable until recreated or saved into the new stock model.`,
       href: `/admin/reconciliation?slug=${encodeURIComponent(product.slug)}`
     }))
   ];
@@ -171,7 +172,7 @@ export function buildReconciliationSummary(input: {
     activeHeldUnits,
     missingOrderPayments,
     stockConflicts,
-    stockSnapshotMismatches,
+    missingInventoryIdentities,
     lowStockProducts,
     issues: issues.sort((a, b) => {
       const weight = { high: 0, medium: 1, low: 2 };

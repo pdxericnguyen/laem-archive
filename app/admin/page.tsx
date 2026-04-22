@@ -2,7 +2,7 @@ import AdminCommandPalette from "./command-palette";
 import AdminSystemHealthBanner from "./system-health-banner";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { readOrder, type OrderRecord } from "@/lib/orders";
-import { getLowStockThreshold } from "@/lib/inventory";
+import { getLowStockThreshold, getStock } from "@/lib/inventory";
 
 export const metadata = { title: "Admin | LAEM Archive" };
 export const dynamic = "force-dynamic";
@@ -33,9 +33,12 @@ async function getDashboardStats() {
       order.printing?.packingSlip?.status === "failed" || order.printing?.shippingLabel?.status === "failed"
   ).length;
 
-  const products = (await kv.get<Array<{ stock?: number }>>(key.products)) || [];
+  const products = ((await kv.get<Array<{ slug?: string }>>(key.products)) || []).filter(
+    (product): product is { slug: string } => typeof product?.slug === "string" && product.slug.length > 0
+  );
   const lowStockThreshold = getLowStockThreshold();
-  const lowStock = products.filter((product) => Number(product?.stock || 0) > 0 && Number(product?.stock || 0) <= lowStockThreshold).length;
+  const stockRows = await Promise.all(products.map((product) => getStock(product.slug)));
+  const lowStock = stockRows.filter((stock) => stock > 0 && stock <= lowStockThreshold).length;
 
   return {
     paidToday,
