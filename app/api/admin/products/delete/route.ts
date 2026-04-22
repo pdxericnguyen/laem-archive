@@ -1,14 +1,17 @@
-import { del as deleteBlob } from "@vercel/blob";
-
+import { deleteBlobIfUnreferenced } from "@/lib/blob-assets";
 import { deleteStockForSlug, summarizeReservationHoldsForSlugs } from "@/lib/inventory";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
-import type { Product } from "@/lib/store";
+import type { Product, ProductCategory } from "@/lib/store";
+
+type ProductCategoryFilter = "all" | ProductCategory | "uncategorized";
 
 type DeletePayload = {
   slug: string;
   confirmSlug: string;
   returnStatusFilter: "all" | "live" | "sold-out" | "archived" | "hidden";
+  returnCategoryFilter: ProductCategoryFilter;
+  returnQuery: string;
 };
 
 function asString(value: unknown) {
@@ -17,6 +20,16 @@ function asString(value: unknown) {
 
 function normalizeReturnStatusFilter(value: unknown): DeletePayload["returnStatusFilter"] {
   return value === "live" || value === "sold-out" || value === "archived" || value === "hidden" ? value : "all";
+}
+
+function normalizeReturnCategoryFilter(value: unknown): ProductCategoryFilter {
+  return value === "clothing" || value === "accessories" || value === "jewelry" || value === "uncategorized"
+    ? value
+    : "all";
+}
+
+function normalizeReturnQuery(value: unknown) {
+  return typeof value === "string" ? value.trim().slice(0, 80) : "";
 }
 
 function wantsJsonResponse(request: Request) {
@@ -38,6 +51,12 @@ function buildRedirectUrl(
   const redirectUrl = new URL("/admin/products", request.url);
   if (payload.returnStatusFilter !== "all") {
     redirectUrl.searchParams.set("status", payload.returnStatusFilter);
+  }
+  if (payload.returnCategoryFilter !== "all") {
+    redirectUrl.searchParams.set("category", payload.returnCategoryFilter);
+  }
+  if (payload.returnQuery) {
+    redirectUrl.searchParams.set("q", payload.returnQuery);
   }
   if (params?.deleted) {
     redirectUrl.searchParams.set("deleted", params.deleted);
@@ -106,20 +125,24 @@ async function getPayload(request: Request): Promise<DeletePayload | null> {
     const slug = asString(body.slug);
     const confirmSlug = asString(body.confirmSlug);
     const returnStatusFilter = normalizeReturnStatusFilter(body.returnStatusFilter);
+    const returnCategoryFilter = normalizeReturnCategoryFilter(body.returnCategoryFilter);
+    const returnQuery = normalizeReturnQuery(body.returnQuery);
     if (!slug || !confirmSlug) {
       return null;
     }
-    return { slug, confirmSlug, returnStatusFilter };
+    return { slug, confirmSlug, returnStatusFilter, returnCategoryFilter, returnQuery };
   }
 
   const formData = await request.formData();
   const slug = asString(formData.get("slug"));
   const confirmSlug = asString(formData.get("confirmSlug"));
   const returnStatusFilter = normalizeReturnStatusFilter(formData.get("returnStatusFilter"));
+  const returnCategoryFilter = normalizeReturnCategoryFilter(formData.get("returnCategoryFilter"));
+  const returnQuery = normalizeReturnQuery(formData.get("returnQuery"));
   if (!slug || !confirmSlug) {
     return null;
   }
-  return { slug, confirmSlug, returnStatusFilter };
+  return { slug, confirmSlug, returnStatusFilter, returnCategoryFilter, returnQuery };
 }
 
 function getProductImages(product: Product | null) {
@@ -209,7 +232,13 @@ export async function POST(request: Request) {
   const imageUrls = getProductImages(product);
   if (imageUrls.length > 0) {
     try {
-      await deleteBlob(imageUrls);
+      await Promise.all(
+        imageUrls.map((imageUrl) =>
+          deleteBlobIfUnreferenced(imageUrl, {
+            excludeProductSlug: payload.slug
+          })
+        )
+      );
     } catch (error) {
       console.error("Blob cleanup failed for deleted product", {
         slug: payload.slug,

@@ -12,11 +12,14 @@ import { requireAdminOrThrow } from "@/lib/require-admin";
 import type { Product, ProductCategory } from "@/lib/store";
 
 type ProductCategoryInput = ProductCategory | "";
+type ProductCategoryFilter = "all" | ProductCategory | "uncategorized";
 
 type ProductPayload = {
   slug: string;
   originalSlug: string;
   returnStatusFilter: "all" | "live" | "sold-out" | "archived" | "hidden";
+  returnCategoryFilter: ProductCategoryFilter;
+  returnQuery: string;
   title: string;
   subtitle: string;
   description: string;
@@ -40,6 +43,16 @@ function normalizeStatus(value: unknown): ProductPayload["status"] | null {
 
 function normalizeReturnStatusFilter(value: unknown): ProductPayload["returnStatusFilter"] {
   return value === "live" || value === "sold-out" || value === "archived" || value === "hidden" ? value : "all";
+}
+
+function normalizeReturnCategoryFilter(value: unknown): ProductCategoryFilter {
+  return value === "clothing" || value === "accessories" || value === "jewelry" || value === "uncategorized"
+    ? value
+    : "all";
+}
+
+function normalizeReturnQuery(value: unknown) {
+  return typeof value === "string" ? value.trim().slice(0, 80) : "";
 }
 
 function getLegacyStatus(published: boolean, archived: boolean): ProductPayload["status"] {
@@ -132,6 +145,12 @@ function buildRedirectUrl(
   if (payload.returnStatusFilter !== "all") {
     redirectUrl.searchParams.set("status", payload.returnStatusFilter);
   }
+  if (payload.returnCategoryFilter !== "all") {
+    redirectUrl.searchParams.set("category", payload.returnCategoryFilter);
+  }
+  if (payload.returnQuery) {
+    redirectUrl.searchParams.set("q", payload.returnQuery);
+  }
   if (params?.saveError) {
     redirectUrl.searchParams.set("saveError", params.saveError);
   }
@@ -162,6 +181,8 @@ async function getPayload(request: Request): Promise<ProductPayload | null> {
           ? body.originalSlug.trim()
           : slug,
       returnStatusFilter: normalizeReturnStatusFilter(body.returnStatusFilter),
+      returnCategoryFilter: normalizeReturnCategoryFilter(body.returnCategoryFilter),
+      returnQuery: normalizeReturnQuery(body.returnQuery),
       title,
       subtitle: typeof body.subtitle === "string" ? body.subtitle : "",
       description:
@@ -205,6 +226,8 @@ async function getPayload(request: Request): Promise<ProductPayload | null> {
         ? String(formData.get("originalSlug")).trim()
         : trimmedSlug,
     returnStatusFilter: normalizeReturnStatusFilter(formData.get("returnStatusFilter")),
+    returnCategoryFilter: normalizeReturnCategoryFilter(formData.get("returnCategoryFilter")),
+    returnQuery: normalizeReturnQuery(formData.get("returnQuery")),
     title: trimmedTitle,
     subtitle: typeof formData.get("subtitle") === "string" ? String(formData.get("subtitle")) : "",
     description:

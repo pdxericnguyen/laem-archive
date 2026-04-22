@@ -2,9 +2,54 @@
 
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 
+type UrlImageItem = {
+  id: string;
+  kind: "url";
+  url: string;
+};
+
+type FileImageItem = {
+  id: string;
+  kind: "file";
+  file: File;
+  previewUrl: string;
+  previousItems?: UrlImageItem[];
+};
+
+type ImageItem = UrlImageItem | FileImageItem;
+
+type ImageOwnerType = "product" | "site_visual";
+
+export const IMAGE_UPLOAD_FIELD_STAGE_EVENT = "laem:image-upload-field:stage";
+export const IMAGE_UPLOAD_FIELD_FLUSH_EVENT = "laem:image-upload-field:flush";
+
+export type ImageUploadFieldFlushResult = {
+  uploadedCount: number;
+  value: string;
+};
+
+type ImageUploadFieldTarget = {
+  name: string;
+  ownerId?: string;
+  ownerType?: ImageOwnerType;
+};
+
+type ImageUploadFieldStageDetail = ImageUploadFieldTarget & {
+  files: File[];
+  handled?: boolean;
+};
+
+type ImageUploadFieldFlushDetail = ImageUploadFieldTarget & {
+  handled?: boolean;
+  resolve?: (result: ImageUploadFieldFlushResult) => void;
+  reject?: (error: unknown) => void;
+};
+
 type Props = {
   name: string;
   defaultValue?: string;
+  ownerId?: string;
+  ownerType?: ImageOwnerType;
   label?: string;
   helperText?: string;
   placeholder?: string;
@@ -15,18 +60,6 @@ type Props = {
   aspectClassName?: string;
 };
 
-function appendLines(base: string, lines: string[]) {
-  const normalized = base.trim();
-  const next = lines.filter(Boolean).join("\n");
-  if (!normalized) {
-    return next;
-  }
-  if (!next) {
-    return normalized;
-  }
-  return `${normalized}\n${next}`;
-}
-
 function firstLine(value: string) {
   return (
     value
@@ -34,6 +67,53 @@ function firstLine(value: string) {
       .map((line) => line.trim())
       .filter(Boolean)[0] || ""
   );
+}
+
+function serializeImageUrls(urls: string[], allowMultiple: boolean) {
+  const nextUrls = allowMultiple ? urls : urls.slice(0, 1);
+  return nextUrls
+    .map((url) => url.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+function parseImageUrls(value: string, allowMultiple: boolean) {
+  const urls = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return allowMultiple ? urls : urls.slice(0, 1);
+}
+
+function createUrlItems(value: string, allowMultiple: boolean) {
+  return parseImageUrls(value, allowMultiple).map((url, index) => ({
+    id: `url-${index}-${url}`,
+    kind: "url" as const,
+    url
+  }));
+}
+
+function getItemPreviewUrl(item: ImageItem) {
+  return item.kind === "file" ? item.previewUrl : item.url;
+}
+
+function getItemLabel(item: ImageItem) {
+  return item.kind === "file" ? item.file.name : item.url;
+}
+
+function isFileItem(item: ImageItem): item is FileImageItem {
+  return item.kind === "file";
+}
+
+function setTextControlValue(control: HTMLInputElement | HTMLTextAreaElement, value: string) {
+  const prototype = Object.getPrototypeOf(control);
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
+  if (descriptor?.set) {
+    descriptor.set.call(control, value);
+  } else {
+    control.value = value;
+  }
+  control.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function isLikelyImageFile(file: File) {
@@ -68,8 +148,10 @@ async function mapWithConcurrency<T, R>(
 export default function ImageUploadField({
   name,
   defaultValue = "",
+  ownerId,
+  ownerType,
   label = "Images (one per line)",
-  helperText = "Click the image frame or the plus box to upload directly to Blob.",
+  helperText = "Drop or choose images. Files upload when you save.",
   placeholder = "One image URL per line",
   previewAlt = "Image preview",
   emptyLabel = "Upload image",
@@ -77,90 +159,449 @@ export default function ImageUploadField({
   allowMultiple = true,
   aspectClassName = "aspect-[4/5]"
 }: Props) {
-  const [value, setValue] = useState(allowMultiple ? defaultValue : firstLine(defaultValue));
+  const [imageItems, setImageItems] = useState<ImageItem[]>(() => createUrlItems(defaultValue, allowMultiple));
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
+  const [deletingUrl, setDeletingUrl] = useState<string | null>(null);
   const [isDropActive, setIsDropActive] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const pendingInputRef = useRef<HTMLInputElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const latestItemsRef = useRef<ImageItem[]>([]);
+  const skipNextSubmitInterceptRef = useRef(false);
+  const pendingIdRef = useRef(0);
   const dropDepthRef = useRef(0);
 
   const imageUrls = useMemo(
-    () =>
-      value
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean),
-    [value]
+    () => imageItems.filter((item) => item.kind === "url").map((item) => item.url),
+    [imageItems]
   );
 
   const imageCount = useMemo(
-    () => imageUrls.length,
-    [imageUrls]
+    () => imageItems.length,
+    [imageItems.length]
+  );
+  const pendingCount = useMemo(
+    () => imageItems.filter(isFileItem).length,
+    [imageItems]
+  );
+  const pendingSignature = useMemo(
+    () =>
+      imageItems
+        .filter(isFileItem)
+        .map((item) => `${item.id}:${item.file.name}:${item.file.size}`)
+        .join("|"),
+    [imageItems]
+  );
+  const normalizedValue = useMemo(
+    () => serializeImageUrls(imageUrls, allowMultiple),
+    [allowMultiple, imageUrls]
   );
 
   useEffect(() => {
-    if (selectedIndex >= imageUrls.length) {
-      setSelectedIndex(Math.max(0, imageUrls.length - 1));
+    if (selectedIndex >= imageItems.length) {
+      setSelectedIndex(Math.max(0, imageItems.length - 1));
     }
-  }, [imageUrls.length, selectedIndex]);
+  }, [imageItems.length, selectedIndex]);
 
-  async function uploadFiles(files: File[]) {
+  useEffect(() => {
+    pendingInputRef.current?.dispatchEvent(new Event("input", { bubbles: true }));
+  }, [normalizedValue, pendingSignature]);
+
+  useEffect(() => {
+    latestItemsRef.current = imageItems;
+  }, [imageItems]);
+
+  useEffect(() => {
+    return () => {
+      for (const item of latestItemsRef.current) {
+        if (item.kind === "file") {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+      }
+    };
+  }, []);
+
+  async function uploadFileToBlob(file: File) {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("folder", uploadFolder);
+
+    const response = await fetch("/api/admin/blob/upload", {
+      method: "POST",
+      body: formData
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok || !payload?.ok || typeof payload.url !== "string") {
+      throw new Error(payload?.error || "Upload failed");
+    }
+
+    return payload.url as string;
+  }
+
+  function stageFiles(files: File[]) {
     if (files.length === 0) {
       setError("Select at least one image.");
       setMessage(null);
       return;
     }
 
-    setUploading(true);
     setError(null);
-    setMessage(null);
+    const stagedItems = files.map((file) => {
+      pendingIdRef.current += 1;
+      return {
+        id: `file-${Date.now()}-${pendingIdRef.current}-${file.name}`,
+        kind: "file" as const,
+        file,
+        previewUrl: URL.createObjectURL(file)
+      };
+    });
 
-    try {
-      const uploadedUrls = await mapWithConcurrency(files, 3, async (file) => {
-        const formData = new FormData();
-        formData.append("file", file);
-        formData.append("folder", uploadFolder);
-
-        const response = await fetch("/api/admin/blob/upload", {
-          method: "POST",
-          body: formData
-        });
-        const payload = await response.json().catch(() => null);
-        if (!response.ok || !payload?.ok || typeof payload.url !== "string") {
-          throw new Error(payload?.error || "Upload failed");
-        }
-
-        return payload.url as string;
-      });
-
-      setValue((current) => (allowMultiple ? appendLines(current, uploadedUrls) : uploadedUrls[0] || current));
-      if (imageUrls.length === 0 && uploadedUrls.length > 0) {
-        setSelectedIndex(0);
+    setImageItems((current) => {
+      if (allowMultiple) {
+        return [...current, ...stagedItems];
       }
-      setMessage(`Uploaded ${uploadedUrls.length} image(s).`);
-    } catch (uploadError) {
-      const errorMessage = uploadError instanceof Error ? uploadError.message : "Upload failed";
-      setError(errorMessage);
-    } finally {
-      setUploading(false);
-    }
+      const previousItems = current.flatMap((item) => {
+        if (item.kind === "url") {
+          return [item];
+        }
+        return item.previousItems || [];
+      });
+      for (const item of current) {
+        if (item.kind === "file") {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+      }
+      return stagedItems.slice(0, 1).map((item) => ({
+        ...item,
+        previousItems
+      }));
+    });
+    setSelectedIndex((current) => (allowMultiple ? imageItems.length || current : 0));
+    setMessage(`${stagedItems.length} image${stagedItems.length === 1 ? "" : "s"} ready. Save to upload.`);
   }
 
+  async function uploadPendingItems(items: ImageItem[]) {
+    const uploadSlots = items
+      .map((item, index) => ({ item, index }))
+      .filter((entry): entry is { item: Extract<ImageItem, { kind: "file" }>; index: number } =>
+        entry.item.kind === "file"
+      );
+    if (uploadSlots.length === 0) {
+      return items;
+    }
+
+    const uploadedUrls = await mapWithConcurrency(uploadSlots, 3, async ({ item }) =>
+      uploadFileToBlob(item.file)
+    );
+    const nextItems = [...items];
+    uploadSlots.forEach(({ item, index }, uploadIndex) => {
+      URL.revokeObjectURL(item.previewUrl);
+      nextItems[index] = {
+        id: `url-${Date.now()}-${uploadIndex}-${uploadedUrls[uploadIndex]}`,
+        kind: "url",
+        url: uploadedUrls[uploadIndex]
+      };
+    });
+    return nextItems;
+  }
+
+  function matchesFieldTarget(detail: ImageUploadFieldTarget) {
+    if (detail.name !== name) {
+      return false;
+    }
+    if (detail.ownerType && detail.ownerType !== ownerType) {
+      return false;
+    }
+    if (detail.ownerId && detail.ownerId !== ownerId) {
+      return false;
+    }
+    return true;
+  }
+
+  async function flushPendingImages() {
+    const currentItems = latestItemsRef.current;
+    const uploadedCount = currentItems.filter(isFileItem).length;
+    if (uploadedCount === 0) {
+      return {
+        uploadedCount: 0,
+        value: serializeImageUrls(imageUrls, allowMultiple)
+      };
+    }
+
+    setUploading(true);
+    setError(null);
+    setMessage("Uploading images before saving...");
+
+    const nextItems = await uploadPendingItems(currentItems);
+    const nextValue = serializeImageUrls(
+      nextItems
+        .filter((item): item is Extract<ImageItem, { kind: "url" }> => item.kind === "url")
+        .map((item) => item.url),
+      allowMultiple
+    );
+
+    latestItemsRef.current = nextItems;
+    setImageItems(nextItems);
+    if (textareaRef.current) {
+      setTextControlValue(textareaRef.current, nextValue);
+    }
+
+    return {
+      uploadedCount,
+      value: nextValue
+    };
+  }
+
+  useEffect(() => {
+    function onStage(event: Event) {
+      if (!(event instanceof CustomEvent)) {
+        return;
+      }
+      const detail = event.detail as ImageUploadFieldStageDetail | null;
+      if (!detail || !matchesFieldTarget(detail) || !Array.isArray(detail.files)) {
+        return;
+      }
+      const imageFiles = detail.files.filter((file) => isLikelyImageFile(file));
+      if (imageFiles.length === 0) {
+        setError("Choose image files only.");
+        setMessage(null);
+        detail.handled = true;
+        return;
+      }
+      stageFiles(allowMultiple ? imageFiles : imageFiles.slice(0, 1));
+      detail.handled = true;
+    }
+
+    function onFlush(event: Event) {
+      if (!(event instanceof CustomEvent)) {
+        return;
+      }
+      const detail = event.detail as ImageUploadFieldFlushDetail | null;
+      if (!detail || !matchesFieldTarget(detail)) {
+        return;
+      }
+      detail.handled = true;
+      flushPendingImages()
+        .then((result) => {
+          setMessage(result.uploadedCount > 0 ? "Images uploaded." : message);
+          setUploading(false);
+          detail.resolve?.(result);
+        })
+        .catch((flushError) => {
+          const errorMessage = flushError instanceof Error ? flushError.message : "Upload failed";
+          setError(errorMessage);
+          setMessage(null);
+          setUploading(false);
+          detail.reject?.(flushError);
+        });
+    }
+
+    window.addEventListener(IMAGE_UPLOAD_FIELD_STAGE_EVENT, onStage);
+    window.addEventListener(IMAGE_UPLOAD_FIELD_FLUSH_EVENT, onFlush);
+    return () => {
+      window.removeEventListener(IMAGE_UPLOAD_FIELD_STAGE_EVENT, onStage);
+      window.removeEventListener(IMAGE_UPLOAD_FIELD_FLUSH_EVENT, onFlush);
+    };
+  }, [allowMultiple, imageUrls, message, name, ownerId, ownerType]);
+
+  useEffect(() => {
+    const form = rootRef.current?.closest("form");
+    if (!(form instanceof HTMLFormElement)) {
+      return;
+    }
+    const formElement = form;
+
+    async function onSubmit(event: SubmitEvent) {
+      if (skipNextSubmitInterceptRef.current) {
+        skipNextSubmitInterceptRef.current = false;
+        return;
+      }
+
+      const currentItems = latestItemsRef.current;
+      if (!currentItems.some((item) => item.kind === "file")) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      setUploading(true);
+      setError(null);
+
+      try {
+        await flushPendingImages();
+        setMessage("Images uploaded. Saving...");
+        skipNextSubmitInterceptRef.current = true;
+        window.setTimeout(() => {
+          const submitter = event.submitter;
+          if (
+            submitter instanceof HTMLButtonElement ||
+            submitter instanceof HTMLInputElement
+          ) {
+            formElement.requestSubmit(submitter);
+          } else {
+            formElement.requestSubmit();
+          }
+        }, 0);
+      } catch (uploadError) {
+        const errorMessage = uploadError instanceof Error ? uploadError.message : "Upload failed";
+        setError(errorMessage);
+        setMessage(null);
+        setUploading(false);
+      }
+    }
+
+    formElement.addEventListener("submit", onSubmit, true);
+    return () => {
+      formElement.removeEventListener("submit", onSubmit, true);
+    };
+  }, [allowMultiple, uploadFolder]);
+
   function openPicker() {
-    if (uploading) {
+    if (uploading || deletingUrl) {
       return;
     }
     fileInputRef.current?.click();
   }
 
+  function updateImageItems(nextItems: ImageItem[], nextSelectedIndex = selectedIndex) {
+    setImageItems(nextItems);
+    setSelectedIndex(Math.max(0, Math.min(nextSelectedIndex, nextItems.length - 1)));
+  }
+
+  function handleUrlTextChange(nextValue: string) {
+    setImageItems((current) => {
+      const nextUrlItems = createUrlItems(
+        allowMultiple ? nextValue : firstLine(nextValue),
+        allowMultiple
+      );
+      if (allowMultiple) {
+        return [...nextUrlItems, ...current.filter(isFileItem)];
+      }
+      for (const item of current) {
+        if (item.kind === "file") {
+          URL.revokeObjectURL(item.previewUrl);
+        }
+      }
+      return nextUrlItems.slice(0, 1);
+    });
+    setSelectedIndex(0);
+  }
+
+  function removeImage(index: number) {
+    if (index < 0 || index >= imageItems.length) {
+      return;
+    }
+    const item = imageItems[index];
+    if (item?.kind === "file") {
+      URL.revokeObjectURL(item.previewUrl);
+      if (!allowMultiple && item.previousItems && item.previousItems.length > 0) {
+        updateImageItems(item.previousItems, 0);
+        setMessage("Pending image discarded. Previous image restored.");
+        setError(null);
+        return;
+      }
+    }
+    const nextItems = imageItems.filter((_, currentIndex) => currentIndex !== index);
+    updateImageItems(nextItems, index >= nextItems.length ? nextItems.length - 1 : index);
+    setMessage(
+      item?.kind === "file"
+        ? "Pending image discarded."
+        : "Image removed from this listing. Save to publish the change."
+    );
+    setError(null);
+  }
+
+  async function deleteImageFile(index: number) {
+    const item = imageItems[index];
+    if (!item || deletingUrl) {
+      return;
+    }
+    if (item.kind === "file") {
+      removeImage(index);
+      return;
+    }
+
+    const url = item.url;
+
+    const confirmed = window.confirm(
+      "Delete this uploaded file permanently? This will only succeed if it is not used by another product or site visual."
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingUrl(url);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch("/api/admin/blob/delete", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: JSON.stringify({
+          url,
+          excludeProductSlug: ownerType === "product" ? ownerId : undefined,
+          excludeSiteVisualPlacement: ownerType === "site_visual" ? ownerId : undefined
+        })
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        const references = Array.isArray(payload?.references)
+          ? payload.references
+              .map((reference: { label?: unknown; id?: unknown }) =>
+                typeof reference.label === "string" ? reference.label : String(reference.id || "")
+              )
+              .filter(Boolean)
+          : [];
+        const suffix = references.length > 0 ? ` Still used by: ${references.join(", ")}.` : "";
+        throw new Error(`${payload?.error || "Unable to delete image."}${suffix}`);
+      }
+
+      removeImage(index);
+      setMessage("Image file deleted and removed from this listing. Save to publish the change.");
+    } catch (deleteError) {
+      const errorMessage = deleteError instanceof Error ? deleteError.message : "Unable to delete image.";
+      setError(errorMessage);
+    } finally {
+      setDeletingUrl(null);
+    }
+  }
+
+  function moveImage(index: number, direction: -1 | 1) {
+    const targetIndex = index + direction;
+    if (index < 0 || targetIndex < 0 || index >= imageItems.length || targetIndex >= imageItems.length) {
+      return;
+    }
+    const nextItems = [...imageItems];
+    const [movedItem] = nextItems.splice(index, 1);
+    nextItems.splice(targetIndex, 0, movedItem);
+    updateImageItems(nextItems, targetIndex);
+    setMessage("Image order updated. Save to publish the change.");
+    setError(null);
+  }
+
+  function setAsPrimary(index: number) {
+    if (!allowMultiple || index <= 0 || index >= imageItems.length) {
+      return;
+    }
+    const nextItems = [...imageItems];
+    const [primaryItem] = nextItems.splice(index, 1);
+    nextItems.unshift(primaryItem);
+    updateImageItems(nextItems, 0);
+    setMessage("Primary image updated. Save to publish the change.");
+    setError(null);
+  }
+
   function onFileInputChange(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files || []);
     if (files.length > 0) {
-      uploadFiles(files).catch(() => {
-        // handled by uploadFiles
-      });
+      stageFiles(allowMultiple ? files : files.slice(0, 1));
     }
     event.currentTarget.value = "";
   }
@@ -214,16 +655,14 @@ export default function ImageUploadField({
     }
 
     const filesToUpload = allowMultiple ? imageFiles : imageFiles.slice(0, 1);
-    uploadFiles(filesToUpload).catch(() => {
-      // handled by uploadFiles
-    });
+    stageFiles(filesToUpload);
   }
 
-  const selectedImageUrl = imageUrls[selectedIndex] || "";
-  const normalizedValue = allowMultiple ? value : firstLine(value);
+  const selectedImageItem = imageItems[selectedIndex] || null;
+  const selectedImageUrl = selectedImageItem ? getItemPreviewUrl(selectedImageItem) : "";
 
   return (
-    <div className="grid gap-2">
+    <div ref={rootRef} className="grid gap-2">
       <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">
         {label}
       </span>
@@ -239,6 +678,7 @@ export default function ImageUploadField({
           <button
             type="button"
             onClick={openPicker}
+            disabled={uploading || Boolean(deletingUrl)}
             className={`group relative block w-full overflow-hidden border bg-neutral-50 hover:bg-neutral-100 ${
               isDropActive ? "border-neutral-800 ring-1 ring-neutral-300" : "border-neutral-300"
             } ${aspectClassName}`}
@@ -251,7 +691,7 @@ export default function ImageUploadField({
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center px-4 text-center text-xs text-neutral-500">
-                {uploading ? "Uploading..." : emptyLabel}
+                {uploading ? "Uploading..." : deletingUrl ? "Deleting..." : emptyLabel}
               </div>
             )}
             {isDropActive ? (
@@ -259,25 +699,61 @@ export default function ImageUploadField({
                 Drop image to upload
               </div>
             ) : null}
+            {selectedImageItem?.kind === "file" ? (
+              <div className="pointer-events-none absolute left-3 top-3 bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-neutral-700">
+                Pending Save
+              </div>
+            ) : null}
             <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-white/90 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-700">
-              {uploading ? "Uploading..." : selectedImageUrl ? "Replace / Add Image" : "Add First Image"}
+              {uploading ? "Uploading..." : deletingUrl ? "Deleting..." : selectedImageUrl ? "Replace / Add Image" : "Add First Image"}
             </div>
           </button>
 
           <div className="flex items-center gap-2 overflow-x-auto">
-            {imageUrls.map((url, index) => (
-              <button
-                key={`${url}-${index}`}
-                type="button"
-                className={`h-16 w-14 shrink-0 overflow-hidden border ${
-                  selectedIndex === index ? "border-neutral-700" : "border-neutral-300"
-                }`}
-                onClick={() => setSelectedIndex(index)}
-                title={`Image ${index + 1}`}
-              >
-                <img src={url} alt={`Image ${index + 1}`} className="h-full w-full object-cover" />
-              </button>
-            ))}
+            {imageItems.map((item, index) => {
+              const previewUrl = getItemPreviewUrl(item);
+              const isPending = item.kind === "file";
+              const itemLabel = getItemLabel(item);
+              return (
+                <div
+                  key={item.id}
+                  className="grid shrink-0 gap-1"
+                >
+                  <button
+                    type="button"
+                    className={`relative h-16 w-14 overflow-hidden border ${
+                      selectedIndex === index ? "border-neutral-700" : "border-neutral-300"
+                    }`}
+                    onClick={() => setSelectedIndex(index)}
+                    title={`Image ${index + 1}: ${itemLabel}`}
+                  >
+                    <img src={previewUrl} alt={`Image ${index + 1}`} className="h-full w-full object-cover" />
+                    <span className="absolute left-1 top-1 bg-white/90 px-1 text-[9px] font-semibold text-neutral-700">
+                      {isPending ? "Pending" : index + 1}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="h-6 border border-neutral-300 text-[10px] font-semibold text-neutral-700 hover:bg-neutral-50"
+                    onClick={() => removeImage(index)}
+                    title={`${isPending ? "Discard pending" : "Remove"} image ${index + 1}`}
+                  >
+                    {isPending ? "Discard" : "Remove"}
+                  </button>
+                  {!isPending ? (
+                    <button
+                      type="button"
+                      className="h-6 border border-red-300 text-[10px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-40"
+                      onClick={() => deleteImageFile(index)}
+                      disabled={Boolean(deletingUrl)}
+                      title={`Delete image ${index + 1} file permanently`}
+                    >
+                      Delete File
+                    </button>
+                  ) : null}
+                </div>
+              );
+            })}
             <button
               type="button"
               onClick={openPicker}
@@ -287,16 +763,70 @@ export default function ImageUploadField({
               +
             </button>
           </div>
+
+          {selectedImageUrl ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="h-8 border border-neutral-300 px-2 text-[11px] font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-40"
+                onClick={() => moveImage(selectedIndex, -1)}
+                disabled={!allowMultiple || selectedIndex <= 0}
+              >
+                Move Left
+              </button>
+              <button
+                type="button"
+                className="h-8 border border-neutral-300 px-2 text-[11px] font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-40"
+                onClick={() => moveImage(selectedIndex, 1)}
+                disabled={!allowMultiple || selectedIndex >= imageItems.length - 1}
+              >
+                Move Right
+              </button>
+              <button
+                type="button"
+                className="h-8 border border-neutral-300 px-2 text-[11px] font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-40"
+                onClick={() => setAsPrimary(selectedIndex)}
+                disabled={!allowMultiple || selectedIndex <= 0}
+              >
+                Set First
+              </button>
+              <button
+                type="button"
+                className="h-8 border border-red-300 px-2 text-[11px] font-semibold text-red-700 hover:bg-red-50"
+                onClick={() => removeImage(selectedIndex)}
+              >
+                {selectedImageItem?.kind === "file" ? "Discard Pending" : "Remove Selected"}
+              </button>
+              {selectedImageItem?.kind === "url" ? (
+                <button
+                  type="button"
+                  className="h-8 border border-red-700 px-2 text-[11px] font-semibold text-red-800 hover:bg-red-50 disabled:opacity-40"
+                  onClick={() => deleteImageFile(selectedIndex)}
+                  disabled={Boolean(deletingUrl)}
+                >
+                  Delete File
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <div className="space-y-2">
           <textarea
+            ref={textareaRef}
             name={name}
             rows={allowMultiple ? 6 : 3}
             className="border border-neutral-300 p-3"
             value={normalizedValue}
-            onChange={(event) => setValue(allowMultiple ? event.target.value : firstLine(event.target.value))}
+            onChange={(event) => handleUrlTextChange(event.target.value)}
             placeholder={placeholder}
+          />
+          <input
+            ref={pendingInputRef}
+            type="hidden"
+            name={`_${name}PendingUploads`}
+            value={pendingSignature}
+            readOnly
           />
           <p className="text-[11px] text-neutral-500">
             {helperText}
@@ -316,12 +846,15 @@ export default function ImageUploadField({
         <button
           type="button"
           className="h-9 px-3 border border-neutral-300 text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
-          disabled={uploading}
+          disabled={uploading || Boolean(deletingUrl)}
           onClick={openPicker}
         >
-          {uploading ? "Uploading..." : "Upload Image"}
+          {uploading ? "Uploading..." : deletingUrl ? "Deleting..." : "Upload Image"}
         </button>
-        <span className="text-xs text-neutral-500">{imageCount} URL(s)</span>
+        <span className="text-xs text-neutral-500">
+          {imageCount} image{imageCount === 1 ? "" : "s"}
+          {pendingCount > 0 ? `, ${pendingCount} pending upload` : ""}
+        </span>
       </div>
 
       {message ? <p className="text-xs text-neutral-600">{message}</p> : null}

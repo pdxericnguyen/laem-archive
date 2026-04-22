@@ -15,6 +15,7 @@ type AdminProductsPageProps = {
 
 type ProductStatus = "live" | "archived" | "hidden";
 type ProductFilterStatus = "all" | ProductStatus | "sold-out";
+type ProductCategoryFilter = "all" | ProductCategory | "uncategorized";
 
 type ProductStatusBadge = {
   label: string;
@@ -24,6 +25,28 @@ type ProductStatusBadge = {
 type FilterOption = {
   value: ProductFilterStatus;
   label: string;
+};
+
+type CategoryFilterOption = {
+  value: ProductCategoryFilter;
+  label: string;
+};
+
+type ProductsViewState = {
+  status: ProductFilterStatus;
+  category: ProductCategoryFilter;
+  query: string;
+};
+
+type ProductsFlashParams = {
+  deletedSlug: string | null;
+  deleteError: DeleteErrorCode | null;
+  deleteSlug: string | null;
+  deleteReservedStock: number | null;
+  deleteActiveCheckoutCount: number | null;
+  deleteLastExpiresAt: number | null;
+  saveError: SaveErrorCode | null;
+  saveSlug: string | null;
 };
 
 const PRODUCT_CATEGORY_OPTIONS: Array<{ value: ProductCategory; label: string }> = [
@@ -93,6 +116,18 @@ function getProductStatusBadge(product: Product, stock: number): ProductStatusBa
 function parseFilterStatus(value: string | string[] | undefined): ProductFilterStatus {
   const raw = typeof value === "string" ? value : Array.isArray(value) ? value[0] : "";
   return raw === "live" || raw === "sold-out" || raw === "archived" || raw === "hidden" ? raw : "all";
+}
+
+function parseCategoryFilter(value: string | string[] | undefined): ProductCategoryFilter {
+  const raw = typeof value === "string" ? value : Array.isArray(value) ? value[0] : "";
+  return raw === "clothing" || raw === "accessories" || raw === "jewelry" || raw === "uncategorized"
+    ? raw
+    : "all";
+}
+
+function parseSearchQuery(value: string | string[] | undefined) {
+  const raw = typeof value === "string" ? value : Array.isArray(value) ? value[0] : "";
+  return raw.trim().slice(0, 80);
 }
 
 function parseDeleteErrorCode(value: string | string[] | undefined): DeleteErrorCode | null {
@@ -168,41 +203,74 @@ function describeHoldWindow(holdSummary: ReservationHoldSummary, nowMs: number) 
   return `Hold expires ${deadline} (${remaining} left).`;
 }
 
-function buildFilterHref(
-  filter: ProductFilterStatus,
-  deletedSlug: string | null,
-  deleteError: DeleteErrorCode | null,
-  deleteSlug: string | null,
-  deleteReservedStock: number | null,
-  deleteActiveCheckoutCount: number | null,
-  deleteLastExpiresAt: number | null,
-  saveError: SaveErrorCode | null,
-  saveSlug: string | null
-) {
+function getCategoryLabel(category: ProductCategoryFilter) {
+  if (category === "all") {
+    return "All Categories";
+  }
+  if (category === "uncategorized") {
+    return "Uncategorized";
+  }
+  return PRODUCT_CATEGORY_OPTIONS.find((option) => option.value === category)?.label || "Category";
+}
+
+function matchesCategoryFilter(product: Product, category: ProductCategoryFilter) {
+  if (category === "all") {
+    return true;
+  }
+  if (category === "uncategorized") {
+    return !product.category;
+  }
+  return product.category === category;
+}
+
+function matchesSearchQuery(product: Product, query: string) {
+  if (!query) {
+    return true;
+  }
+  const needle = query.toLowerCase();
+  return [
+    product.title,
+    product.slug,
+    product.subtitle,
+    product.category || ""
+  ].some((value) => value.toLowerCase().includes(needle));
+}
+
+function addFlashParams(params: URLSearchParams, flash: ProductsFlashParams) {
+  if (flash.deletedSlug) {
+    params.set("deleted", flash.deletedSlug);
+  }
+  if (flash.deleteError && flash.deleteSlug) {
+    params.set("deleteError", flash.deleteError);
+    params.set("deleteSlug", flash.deleteSlug);
+    if (flash.deleteReservedStock) {
+      params.set("deleteReservedStock", String(flash.deleteReservedStock));
+    }
+    if (flash.deleteActiveCheckoutCount) {
+      params.set("deleteActiveCheckoutCount", String(flash.deleteActiveCheckoutCount));
+    }
+    if (flash.deleteLastExpiresAt) {
+      params.set("deleteLastExpiresAt", String(flash.deleteLastExpiresAt));
+    }
+  }
+  if (flash.saveError && flash.saveSlug) {
+    params.set("saveError", flash.saveError);
+    params.set("saveSlug", flash.saveSlug);
+  }
+}
+
+function buildProductsHref(view: ProductsViewState, flash: ProductsFlashParams) {
   const params = new URLSearchParams();
-  if (filter !== "all") {
-    params.set("status", filter);
+  if (view.status !== "all") {
+    params.set("status", view.status);
   }
-  if (deletedSlug) {
-    params.set("deleted", deletedSlug);
+  if (view.category !== "all") {
+    params.set("category", view.category);
   }
-  if (deleteError && deleteSlug) {
-    params.set("deleteError", deleteError);
-    params.set("deleteSlug", deleteSlug);
-    if (deleteReservedStock) {
-      params.set("deleteReservedStock", String(deleteReservedStock));
-    }
-    if (deleteActiveCheckoutCount) {
-      params.set("deleteActiveCheckoutCount", String(deleteActiveCheckoutCount));
-    }
-    if (deleteLastExpiresAt) {
-      params.set("deleteLastExpiresAt", String(deleteLastExpiresAt));
-    }
+  if (view.query) {
+    params.set("q", view.query);
   }
-  if (saveError && saveSlug) {
-    params.set("saveError", saveError);
-    params.set("saveSlug", saveSlug);
-  }
+  addFlashParams(params, flash);
   const query = params.toString();
   return query ? `/admin/products?${query}` : "/admin/products";
 }
@@ -359,6 +427,8 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
   const saveSlug = typeof resolvedSearchParams.saveSlug === "string" ? resolvedSearchParams.saveSlug : null;
   const saveErrorMessage = getSaveErrorMessage(saveError, saveSlug);
   const activeFilter = parseFilterStatus(resolvedSearchParams.status);
+  const activeCategory = parseCategoryFilter(resolvedSearchParams.category);
+  const searchQuery = parseSearchQuery(resolvedSearchParams.q);
   const filterOptions: FilterOption[] = [
     { value: "all", label: "All" },
     { value: "live", label: "Live" },
@@ -366,6 +436,21 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
     { value: "archived", label: "Archived" },
     { value: "hidden", label: "Hidden" }
   ];
+  const categoryOptions: CategoryFilterOption[] = [
+    { value: "all", label: "All Categories" },
+    ...PRODUCT_CATEGORY_OPTIONS,
+    { value: "uncategorized", label: "Uncategorized" }
+  ];
+  const flashParams: ProductsFlashParams = {
+    deletedSlug,
+    deleteError,
+    deleteSlug,
+    deleteReservedStock,
+    deleteActiveCheckoutCount,
+    deleteLastExpiresAt,
+    saveError,
+    saveSlug
+  };
   const filterCounts = {
     all: productRows.length,
     live: productRows.filter(({ product, stock }) => getProductFilterStatus(product, stock) === "live").length,
@@ -373,11 +458,23 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
     archived: productRows.filter(({ product, stock }) => getProductFilterStatus(product, stock) === "archived").length,
     hidden: productRows.filter(({ product, stock }) => getProductFilterStatus(product, stock) === "hidden").length
   };
-  const filteredRows =
+  const statusFilteredRows =
     activeFilter === "all"
       ? productRows
       : productRows.filter(({ product, stock }) => getProductFilterStatus(product, stock) === activeFilter);
+  const categoryCounts = {
+    all: statusFilteredRows.length,
+    clothing: statusFilteredRows.filter(({ product }) => product.category === "clothing").length,
+    accessories: statusFilteredRows.filter(({ product }) => product.category === "accessories").length,
+    jewelry: statusFilteredRows.filter(({ product }) => product.category === "jewelry").length,
+    uncategorized: statusFilteredRows.filter(({ product }) => !product.category).length
+  };
+  const filteredRows = statusFilteredRows
+    .filter(({ product }) => matchesCategoryFilter(product, activeCategory))
+    .filter(({ product }) => matchesSearchQuery(product, searchQuery));
   const activeFilterLabel = filterOptions.find((option) => option.value === activeFilter)?.label || "All";
+  const activeCategoryLabel = getCategoryLabel(activeCategory);
+  const hasProductSearch = Boolean(searchQuery || activeCategory !== "all" || activeFilter !== "all");
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10 space-y-10">
@@ -410,23 +507,70 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
       <AdminCommandPalette />
       <UnsavedChangesGuard selector='form[action="/api/admin/products/save"]' />
 
-      <section className="space-y-3">
+      <section className="border border-neutral-200 p-4 space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold tracking-tight">Find Products</h2>
+            <p className="text-xs text-neutral-500">
+              Search and filter existing products without changing the full add-product flow below.
+            </p>
+          </div>
+          {hasProductSearch ? (
+            <a
+              href={buildProductsHref(
+                { status: "all", category: "all", query: "" },
+                flashParams
+              )}
+              className="inline-flex h-9 items-center border border-neutral-300 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-700 no-underline hover:bg-neutral-50"
+            >
+              Clear Filters
+            </a>
+          ) : null}
+        </div>
+
+        <form action="/admin/products" method="GET" className="grid gap-3 md:grid-cols-[1fr_220px_auto]">
+          {activeFilter !== "all" ? <input type="hidden" name="status" value={activeFilter} /> : null}
+          <label className="grid gap-1">
+            <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Search</span>
+            <input
+              name="q"
+              defaultValue={searchQuery}
+              className="h-10 border border-neutral-300 px-3 text-sm"
+              placeholder="Title, slug, subtitle"
+            />
+          </label>
+          <label className="grid gap-1">
+            <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Category</span>
+            <select
+              name="category"
+              defaultValue={activeCategory}
+              className="h-10 border border-neutral-300 bg-white px-3 text-sm"
+            >
+              {categoryOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label} ({categoryCounts[option.value]})
+                </option>
+              ))}
+            </select>
+          </label>
+          <button className="h-10 self-end border border-neutral-300 px-4 text-xs font-semibold uppercase tracking-[0.12em] hover:bg-neutral-50">
+            Apply
+          </button>
+        </form>
+
         <div className="flex flex-wrap gap-2">
           {filterOptions.map((option) => {
             const isActive = option.value === activeFilter;
             return (
               <a
                 key={option.value}
-                href={buildFilterHref(
-                  option.value,
-                  deletedSlug,
-                  deleteError,
-                  deleteSlug,
-                  deleteReservedStock,
-                  deleteActiveCheckoutCount,
-                  deleteLastExpiresAt,
-                  saveError,
-                  saveSlug
+                href={buildProductsHref(
+                  {
+                    status: option.value,
+                    category: activeCategory,
+                    query: searchQuery
+                  },
+                  flashParams
                 )}
                 className={`inline-flex items-center gap-2 border px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] no-underline transition-colors ${
                   isActive
@@ -445,7 +589,11 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
           })}
         </div>
         <p className="text-xs text-neutral-500">
-          Showing <span className="font-semibold text-neutral-700">{activeFilterLabel}</span> products for faster admin review.
+          Showing <span className="font-semibold text-neutral-700">{filteredRows.length}</span> of{" "}
+          <span className="font-semibold text-neutral-700">{productRows.length}</span> products
+          {activeFilter !== "all" ? <> in <span className="font-semibold text-neutral-700">{activeFilterLabel}</span></> : null}
+          {activeCategory !== "all" ? <> for <span className="font-semibold text-neutral-700">{activeCategoryLabel}</span></> : null}
+          {searchQuery ? <> matching <span className="font-semibold text-neutral-700">&quot;{searchQuery}&quot;</span></> : null}.
         </p>
       </section>
 
@@ -534,7 +682,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
             Live shows in shop. Archived moves the piece to the archive page. Hidden removes it from public pages.
             Stock controls quantity; Status controls public availability.
           </p>
-          <ImageUploadField name="images" />
+          <ImageUploadField name="images" ownerType="product" />
           <label className="grid gap-1">
             <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Materials</span>
             <textarea name="materials" rows={2} className="border border-neutral-300 p-3" />
@@ -558,10 +706,24 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-sm font-semibold tracking-tight">Existing Products</h2>
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold tracking-tight">Existing Products</h2>
+            <p className="text-xs text-neutral-500">
+              Compact rows stay closed for scanning. Open a row when you need the full editor.
+            </p>
+          </div>
+          <span className="border border-neutral-200 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-600">
+            {filteredRows.length} shown
+          </span>
+        </div>
         {filteredRows.length === 0 ? (
           <div className="border border-neutral-200 p-6 text-sm text-neutral-600">
-            {activeFilter === "all" ? "No products yet." : `No ${activeFilterLabel.toLowerCase()} products yet.`}
+            {hasProductSearch
+              ? "No products match the current filters."
+              : activeFilter === "all"
+                ? "No products yet."
+                : `No ${activeFilterLabel.toLowerCase()} products yet.`}
           </div>
         ) : (
           filteredRows.map(({ product, stock, holdSummary }) => {
@@ -597,31 +759,84 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                       exactly to confirm deletion.
                     </>
                   );
+            const categoryLabel = product.category
+              ? PRODUCT_CATEGORY_OPTIONS.find((option) => option.value === product.category)?.label || product.category
+              : "Uncategorized";
+            const thumbnailUrl = product.images.find(Boolean);
+            const shouldOpenEditor = product.slug === saveSlug || product.slug === deleteSlug;
 
             return (
-            <div key={product.slug} className="border border-neutral-200 p-6 space-y-4">
-              <div className="flex flex-wrap items-start justify-between gap-3 border-b border-neutral-200 pb-4">
-                <div className="space-y-1">
-                  <h3 className="text-sm font-semibold tracking-tight">{product.title}</h3>
-                  <p className="text-xs text-neutral-500">
-                    <code>{product.slug}</code>
-                  </p>
-                  <a
-                    href={`/admin/reconciliation?slug=${encodeURIComponent(product.slug)}`}
-                    className="inline-flex text-xs font-semibold text-neutral-700 underline"
-                  >
-                    View stock timeline
-                  </a>
+            <details
+              key={product.slug}
+              open={shouldOpenEditor}
+              className="group border border-neutral-200 bg-white"
+            >
+              <summary className="grid cursor-pointer list-none gap-3 p-4 transition-colors hover:bg-neutral-50 md:grid-cols-[72px_1fr_auto] [&::-webkit-details-marker]:hidden">
+                <div className="h-20 w-16 overflow-hidden border border-neutral-200 bg-neutral-100">
+                  {thumbnailUrl ? (
+                    <img
+                      src={thumbnailUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-[0.12em] text-neutral-400">
+                      No Image
+                    </div>
+                  )}
                 </div>
-                <span
-                  className={`inline-flex items-center border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${statusBadge.className}`}
+                <div className="min-w-0 space-y-2">
+                  <div className="space-y-1">
+                    <h3 className="truncate text-sm font-semibold tracking-tight">{product.title}</h3>
+                    <p className="truncate text-xs text-neutral-500">
+                      <code>{product.slug}</code>
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 text-[11px] text-neutral-600">
+                    <span className="border border-neutral-200 px-2 py-1">{categoryLabel}</span>
+                    <span className="border border-neutral-200 px-2 py-1">${formatPriceInput(product.priceCents)}</span>
+                    <span className="border border-neutral-200 px-2 py-1">Stock {stock}</span>
+                    {holdSummary.reservedStock > 0 ? (
+                      <span className="border border-amber-300 bg-amber-50 px-2 py-1 text-amber-800">
+                        {holdSummary.reservedStock} held
+                      </span>
+                    ) : null}
+                    <span className="border border-neutral-200 px-2 py-1">
+                      {product.images.length} image{product.images.length === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-start justify-between gap-2 md:min-w-[190px] md:justify-end">
+                  <span
+                    className={`inline-flex items-center border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${statusBadge.className}`}
+                  >
+                    {statusBadge.label}
+                  </span>
+                  <span className="inline-flex items-center border border-neutral-300 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-neutral-700 group-open:hidden">
+                    Open Editor
+                  </span>
+                  <span className="hidden items-center border border-neutral-900 bg-neutral-900 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-white group-open:inline-flex">
+                    Editing
+                  </span>
+                </div>
+              </summary>
+              <div className="border-t border-neutral-200 p-6 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-neutral-500">
+                  Full editor for <span className="font-semibold text-neutral-700">{product.title}</span>.
+                </p>
+                <a
+                  href={`/admin/reconciliation?slug=${encodeURIComponent(product.slug)}`}
+                  className="inline-flex text-xs font-semibold text-neutral-700 underline"
                 >
-                  {statusBadge.label}
-                </span>
+                  View stock timeline
+                </a>
               </div>
               <form action="/api/admin/products/save" method="POST" className="grid gap-3 text-sm">
                 <input type="hidden" name="originalSlug" value={product.slug} />
                 <input type="hidden" name="returnStatusFilter" value={activeFilter} />
+                <input type="hidden" name="returnCategoryFilter" value={activeCategory} />
+                <input type="hidden" name="returnQuery" value={searchQuery} />
                 <label className="grid gap-1">
                   <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">
                     Slug{slugLocked ? " (locked while live)" : ""}
@@ -739,7 +954,12 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                   live in the archive instead. When editing manually, set Status to Live after restocking if you want it
                   purchasable again.
                 </p>
-                <ImageUploadField name="images" defaultValue={product.images.join("\n")} />
+                <ImageUploadField
+                  name="images"
+                  defaultValue={product.images.join("\n")}
+                  ownerType="product"
+                  ownerId={product.slug}
+                />
                 <label className="grid gap-1">
                   <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Materials</span>
                   <textarea
@@ -783,6 +1003,8 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
               <form action="/api/admin/products/delete" method="POST" className="border-t border-neutral-200 pt-4 grid gap-3 text-sm">
                 <input type="hidden" name="slug" value={product.slug} />
                 <input type="hidden" name="returnStatusFilter" value={activeFilter} />
+                <input type="hidden" name="returnCategoryFilter" value={activeCategory} />
+                <input type="hidden" name="returnQuery" value={searchQuery} />
                 <div className="space-y-1">
                   <h3 className="text-xs uppercase tracking-[0.12em] text-red-700">Delete Listing</h3>
                   <p className="text-xs text-neutral-600">
@@ -809,7 +1031,8 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                   Delete Listing
                 </button>
               </form>
-            </div>
+              </div>
+            </details>
             );
           })
         )}

@@ -2,6 +2,11 @@
 
 import { useRef, useState, type ChangeEvent } from "react";
 
+import {
+  IMAGE_UPLOAD_FIELD_FLUSH_EVENT,
+  IMAGE_UPLOAD_FIELD_STAGE_EVENT,
+  type ImageUploadFieldFlushResult
+} from "@/app/admin/products/image-upload-field";
 import type { SiteVisualPlacement } from "@/lib/site-visuals";
 
 type VisualPayload = {
@@ -48,13 +53,6 @@ function mapFileToPlacement(fileName: string, placements: SiteVisualPlacement[])
     }
   }
   return null;
-}
-
-function setInputValue(control: HTMLInputElement | HTMLTextAreaElement, value: string) {
-  const prototype = Object.getPrototypeOf(control);
-  const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
-  descriptor?.set?.call(control, value);
-  control.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function readTextControl(form: HTMLFormElement, name: string) {
@@ -137,44 +135,6 @@ function getSaveForms() {
   );
 }
 
-async function uploadVisualFile(file: File) {
-  const formData = new FormData();
-  formData.append("file", file);
-  formData.append("folder", "site-visuals");
-
-  const response = await fetch("/api/admin/blob/upload", {
-    method: "POST",
-    body: formData
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || !payload?.ok || typeof payload.url !== "string") {
-    throw new Error(payload?.error || `Upload failed for ${file.name}`);
-  }
-  return payload.url as string;
-}
-
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  worker: (item: T, index: number) => Promise<R>
-) {
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const workerCount = Math.min(Math.max(1, limit), items.length);
-
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < items.length) {
-        const index = nextIndex;
-        nextIndex += 1;
-        results[index] = await worker(items[index], index);
-      }
-    })
-  );
-
-  return results;
-}
-
 export default function AdminVisualBulkActions({ placements, initialPayloads }: Props) {
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -187,20 +147,61 @@ export default function AdminVisualBulkActions({ placements, initialPayloads }: 
     setError(null);
   }
 
-  function applyImageUrlToPlacement(placement: SiteVisualPlacement, imageUrl: string) {
-    const form = document.querySelector<HTMLFormElement>(`form[data-visual-save-form="${placement}"]`);
-    if (!form) {
-      return false;
-    }
-    const imageControl = form.querySelector<HTMLTextAreaElement>('textarea[name="imageUrl"]');
-    if (!imageControl) {
-      return false;
-    }
-    setInputValue(imageControl, imageUrl);
-    return true;
+  function stageImageFileForPlacement(placement: SiteVisualPlacement, file: File) {
+    const detail = {
+      name: "imageUrl",
+      ownerType: "site_visual" as const,
+      ownerId: placement,
+      files: [file],
+      handled: false
+    };
+    window.dispatchEvent(new CustomEvent(IMAGE_UPLOAD_FIELD_STAGE_EVENT, { detail }));
+    return detail.handled;
   }
 
-  async function handleBulkFiles(event: ChangeEvent<HTMLInputElement>) {
+  function flushImageFieldForPlacement(placement: SiteVisualPlacement) {
+    return new Promise<ImageUploadFieldFlushResult>((resolve, reject) => {
+      const detail = {
+        name: "imageUrl",
+        ownerType: "site_visual" as const,
+        ownerId: placement,
+        handled: false,
+        resolve,
+        reject
+      };
+      window.dispatchEvent(new CustomEvent(IMAGE_UPLOAD_FIELD_FLUSH_EVENT, { detail }));
+      if (!detail.handled) {
+        reject(new Error("Image field missing"));
+      }
+    });
+  }
+
+  async function flushPendingImageFields(forms: HTMLFormElement[]) {
+    const failures: string[] = [];
+    let uploadedCount = 0;
+
+    for (const form of forms) {
+      const placement = form.getAttribute("data-visual-save-form") as SiteVisualPlacement | null;
+      if (!placement) {
+        continue;
+      }
+      try {
+        const result = await flushImageFieldForPlacement(placement);
+        uploadedCount += result.uploadedCount;
+      } catch (flushError) {
+        failures.push(
+          `${placement}: ${flushError instanceof Error ? flushError.message : "image upload failed"}`
+        );
+      }
+    }
+
+    return {
+      failures,
+      uploadedCount
+    };
+  }
+
+  function handleBulkFiles(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files || []);
     event.currentTarget.value = "";
     if (files.length === 0 || working) {
@@ -231,39 +232,20 @@ export default function AdminVisualBulkActions({ placements, initialPayloads }: 
       return;
     }
 
-    const uploadResults = await mapWithConcurrency(
-      Array.from(mappedByPlacement.entries()),
-      3,
-      async ([placement, file]) => {
-        try {
-          const url = await uploadVisualFile(file);
-          return { placement, url, error: null as string | null };
-        } catch (uploadError) {
-          return {
-            placement,
-            url: null,
-            error: uploadError instanceof Error ? uploadError.message : `${file.name} failed`
-          };
-        }
-      }
-    );
-
     let assigned = 0;
     const failed: string[] = [];
-    for (const result of uploadResults) {
-      if (result.error || !result.url) {
-        failed.push(result.error || `${result.placement} failed`);
-        continue;
-      }
-      if (applyImageUrlToPlacement(result.placement, result.url)) {
+    for (const [placement, file] of mappedByPlacement) {
+      if (stageImageFileForPlacement(placement, file)) {
         assigned += 1;
       } else {
-        failed.push(`${result.placement} (form missing)`);
+        failed.push(`${placement} (form missing)`);
       }
     }
 
     const details: string[] = [];
-    details.push(`Mapped ${assigned} placement${assigned === 1 ? "" : "s"}.`);
+    details.push(
+      `Mapped ${assigned} placement${assigned === 1 ? "" : "s"}. Save All Changes to upload and save.`
+    );
     if (overwrittenCount > 0) {
       details.push(`Used the last file for ${overwrittenCount} duplicate placement match${overwrittenCount === 1 ? "" : "es"}.`);
     }
@@ -271,7 +253,7 @@ export default function AdminVisualBulkActions({ placements, initialPayloads }: 
       details.push(`Skipped ${unmapped.length} unmapped file${unmapped.length === 1 ? "" : "s"}.`);
     }
     if (failed.length > 0) {
-      setError(`Some uploads failed: ${failed.join("; ")}`);
+      setError(`Some files could not be mapped: ${failed.join("; ")}`);
     }
     setMessage(details.join(" "));
     setWorking(false);
@@ -285,6 +267,19 @@ export default function AdminVisualBulkActions({ placements, initialPayloads }: 
     setWorking(true);
 
     const forms = getSaveForms();
+    setMessage("Preparing images...");
+
+    const imageFlush = await flushPendingImageFields(forms);
+    if (imageFlush.failures.length > 0) {
+      setError(`Image upload failed: ${imageFlush.failures.join("; ")}`);
+      setMessage(null);
+      setWorking(false);
+      return;
+    }
+    if (imageFlush.uploadedCount > 0) {
+      setMessage(`Uploaded ${imageFlush.uploadedCount} image${imageFlush.uploadedCount === 1 ? "" : "s"}. Saving...`);
+    }
+
     const payloads: VisualPayload[] = [];
     let skippedMissingImage = 0;
 
