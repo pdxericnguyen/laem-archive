@@ -18,7 +18,7 @@ function asBoundedInt(value: string | undefined, fallback: number, min: number, 
   return Math.min(max, Math.max(min, Math.floor(parsed)));
 }
 
-export function getCheckoutLimitsFromEnv(env: NodeJS.ProcessEnv = process.env): CheckoutLimits {
+export function getCheckoutLimitsFromEnv(env: Partial<NodeJS.ProcessEnv> = process.env): CheckoutLimits {
   return {
     maxDistinctItems: asBoundedInt(env.CHECKOUT_MAX_DISTINCT_ITEMS, 20, 1, 100),
     maxUnitsPerItem: asBoundedInt(env.CHECKOUT_MAX_UNITS_PER_ITEM, 10, 1, 100),

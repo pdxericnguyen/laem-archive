@@ -1,13 +1,15 @@
 import ProductGallery from "@/app/products/[slug]/gallery";
+import { notFound } from "next/navigation";
 
 export const metadata = {
   title: "Gallery Sandbox | LAEM Archive"
 };
+export const dynamic = "force-dynamic";
 
 type Props = {
-  searchParams?: {
+  searchParams?: Promise<{
     images?: string;
-  };
+  }>;
 };
 
 function getImageCount(value?: string) {
@@ -19,8 +21,13 @@ function getImageCount(value?: string) {
   return Math.max(1, Math.min(12, Math.floor(requestedCount)));
 }
 
-export default function GallerySandboxPage({ searchParams }: Props) {
-  const imageCount = getImageCount(searchParams?.images);
+export default async function GallerySandboxPage({ searchParams }: Props) {
+  if (process.env.NODE_ENV === "production") {
+    notFound();
+  }
+
+  const resolvedSearchParams = await searchParams;
+  const imageCount = getImageCount(resolvedSearchParams?.images);
   const testImages = Array.from({ length: imageCount }, (_, index) => `/placeholder-product.svg?i=${index + 1}`);
 
   return (

@@ -344,24 +344,30 @@ final class LAEMTerminalManager: NSObject, ObservableObject {
             )
         }
 
+        guard let apiClient else {
+            throw LAEMTerminalManagerError.invalidConfiguration(
+                "Set LAEMAPIBaseURL before using the live payment flow."
+            )
+        }
+
         let localReference = makeLocalPaymentReference()
         pendingPaymentIntentID = localReference
         refreshBusyState()
         displayMessage = "Preparing payment"
-        statusDetail = "Creating payment intent in Stripe Terminal..."
+        statusDetail = "Creating payment intent from the LAEM backend..."
 
         #if canImport(StripeTerminal)
+        var serverPaymentIntentId: String?
         do {
             let amount = lines.reduce(0) { $0 + $1.subtotalCents }
-            let currency = lines.first?.product.currency.lowercased() ?? "usd"
             try validateOfflineStorageLimit(newAmount: amount)
-            let intent = try await createPaymentIntent(
-                amount: amount,
-                currency: currency,
+            let serverIntent = try await apiClient.createPaymentIntent(
+                lines: lines,
                 email: email,
-                captureMethod: captureMethod,
-                metadata: makePaymentMetadata(lines: lines, localReference: localReference)
+                captureMethod: captureMethod
             )
+            serverPaymentIntentId = serverIntent.paymentIntentId
+            let intent = try await retrievePaymentIntent(clientSecret: serverIntent.clientSecret)
             displayMessage = "Present card"
             statusDetail = "Collecting payment method on the reader..."
 
@@ -370,8 +376,8 @@ final class LAEMTerminalManager: NSObject, ObservableObject {
             statusDetail = "Confirming payment with Stripe..."
 
             let confirmedIntent = try await confirmPaymentIntentWithRetry(collectedIntent)
-            let resolvedID = confirmedIntent.stripeId
-            let storedOffline = confirmedIntent.offlineDetails?.requiresUpload == true || resolvedID == nil
+            let resolvedID = confirmedIntent.stripeId ?? serverIntent.paymentIntentId
+            let storedOffline = confirmedIntent.offlineDetails?.requiresUpload == true || confirmedIntent.stripeId == nil
             let requiresCapture = captureMethod == .manual || confirmedIntent.status == .requiresCapture
 
             pendingPaymentIntentID = nil
@@ -389,6 +395,9 @@ final class LAEMTerminalManager: NSObject, ObservableObject {
                 storedOffline: storedOffline
             )
         } catch {
+            if let serverPaymentIntentId {
+                try? await apiClient.cancelPaymentIntent(id: serverPaymentIntentId)
+            }
             pendingPaymentIntentID = nil
             refreshBusyState()
             refreshOfflineStatus()
@@ -670,24 +679,9 @@ final class LAEMTerminalManager: NSObject, ObservableObject {
         }
     }
 
-    private func createPaymentIntent(
-        amount: Int,
-        currency: String,
-        email: String?,
-        captureMethod: PaymentCaptureMethod,
-        metadata: [String: String]
-    ) async throws -> PaymentIntent {
-        let parameters = try makePaymentIntentParameters(
-            amount: amount,
-            currency: currency,
-            email: email,
-            captureMethod: captureMethod,
-            metadata: metadata
-        )
-        let createConfig = try makeCreateConfiguration()
-
-        return try await withCheckedThrowingContinuation { continuation in
-            Terminal.shared.createPaymentIntent(parameters, createConfig: createConfig) { intent, error in
+    private func retrievePaymentIntent(clientSecret: String) async throws -> PaymentIntent {
+        try await withCheckedThrowingContinuation { continuation in
+            Terminal.shared.retrievePaymentIntent(clientSecret: clientSecret) { intent, error in
                 if let intent {
                     continuation.resume(returning: intent)
                 } else {
@@ -697,34 +691,6 @@ final class LAEMTerminalManager: NSObject, ObservableObject {
                 }
             }
         }
-    }
-
-    private func makePaymentIntentParameters(
-        amount: Int,
-        currency: String,
-        email: String?,
-        captureMethod: PaymentCaptureMethod,
-        metadata: [String: String]
-    ) throws -> PaymentIntentParameters {
-        let builder = PaymentIntentParametersBuilder(amount: UInt(amount), currency: currency)
-            .setCaptureMethod(captureMethod == .manual ? .manual : .automatic)
-            .setMetadata(metadata)
-
-        if let email = normalized(email) {
-            _ = builder.setReceiptEmail(email)
-        }
-
-        return try builder.build()
-    }
-
-    private func makeCreateConfiguration() throws -> CreateConfiguration? {
-        guard AppConfiguration.allowOfflinePayments else {
-            return nil
-        }
-
-        let builder = CreateConfigurationBuilder()
-            .setOfflineBehavior(.preferOnline)
-        return try builder.build()
     }
 
     private func validateOfflineStorageLimit(newAmount: Int) throws {
@@ -741,37 +707,6 @@ final class LAEMTerminalManager: NSObject, ObservableObject {
                 "Offline payment queue limit reached. Bring the device online before storing more payments."
             )
         }
-    }
-
-    private func makePaymentMetadata(lines: [CartLine], localReference: String) -> [String: String] {
-        let singleSlug = lines.count == 1 ? lines[0].product.slug : nil
-        let quantityTotal = lines.reduce(0) { $0 + $1.quantity }
-
-        var metadata: [String: String] = [
-            "source": "laem_pos_terminal",
-            "cart": serializeCartLines(lines),
-            "quantity_total": String(quantityTotal),
-            "laem_local_payment_id": localReference,
-            "laem_created_at": String(Int(Date().timeIntervalSince1970))
-        ]
-
-        if let singleSlug {
-            metadata["slug"] = singleSlug
-        }
-
-        return metadata
-    }
-
-    private func serializeCartLines(_ lines: [CartLine]) -> String {
-        let grouped = Dictionary(grouping: lines, by: { $0.product.slug })
-            .map { slug, rows in
-                (slug, rows.reduce(0) { $0 + $1.quantity })
-            }
-            .sorted { $0.0 < $1.0 }
-
-        return grouped
-            .map { "\($0.0):\($0.1)" }
-            .joined(separator: ",")
     }
 
     private func makeLocalPaymentReference() -> String {

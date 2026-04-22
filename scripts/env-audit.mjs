@@ -22,10 +22,33 @@ const optionalVars = [
   "POS_SESSION_SECRET",
   "POS_SESSION_TTL_SECONDS",
   "POS_CURRENCY",
+  "CHECKOUT_ALLOWED_ORIGINS",
+  "STRIPE_SHIPPING_ALLOWED_COUNTRIES",
+  "PRINTNODE_API_KEY",
+  "PRINTNODE_SLIP_PRINTER_ID",
+  "PRINTNODE_POS_SLIP_PRINTER_ID",
+  "PRINTNODE_LABEL_PRINTER_ID",
+  "AUTO_PRINT_PACKING_SLIP",
+  "AUTO_PRINT_PACKING_SLIP_POS",
+  "EASYPOST_API_KEY",
+  "SHIP_FROM_NAME",
+  "SHIP_FROM_PHONE",
+  "SHIP_FROM_EMAIL",
+  "SHIP_FROM_LINE1",
+  "SHIP_FROM_LINE2",
+  "SHIP_FROM_CITY",
+  "SHIP_FROM_STATE",
+  "SHIP_FROM_POSTAL_CODE",
+  "SHIP_FROM_COUNTRY",
+  "SHIP_DEFAULT_WEIGHT_OZ",
+  "SHIP_DEFAULT_LENGTH_IN",
+  "SHIP_DEFAULT_WIDTH_IN",
+  "SHIP_DEFAULT_HEIGHT_IN",
   "INVENTORY_ALERT_EMAIL",
   "ADMIN_ALERT_EMAIL",
   "LOW_STOCK_THRESHOLD",
   "CHECKOUT_RESERVATION_TTL_SECONDS",
+  "ORDER_PII_RETENTION_DAYS",
   "RATE_LIMIT_LOGIN_MAX",
   "RATE_LIMIT_LOGIN_WINDOW_SECONDS",
   "RATE_LIMIT_POS_LOGIN_MAX",
@@ -46,6 +69,10 @@ const optionalVars = [
 
 function isSet(value) {
   return typeof value === "string" && value.trim().length > 0;
+}
+
+function isEnabled(value) {
+  return typeof value === "string" && ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
 }
 
 function parseArgs(argv) {
@@ -160,6 +187,55 @@ function main() {
     warnings.push("POS_SESSION_SECRET is not set; POS sessions will fall back to ADMIN_SESSION_SECRET or token envs.");
   }
 
+  if (isEnabled(env.AUTO_PRINT_PACKING_SLIP)) {
+    if (!isSet(env.PRINTNODE_API_KEY) || !isSet(env.PRINTNODE_SLIP_PRINTER_ID)) {
+      warnings.push("AUTO_PRINT_PACKING_SLIP is enabled but PRINTNODE_API_KEY or PRINTNODE_SLIP_PRINTER_ID is missing.");
+    }
+  }
+
+  if (isEnabled(env.AUTO_PRINT_PACKING_SLIP_POS)) {
+    if (
+      !isSet(env.PRINTNODE_API_KEY) ||
+      (!isSet(env.PRINTNODE_POS_SLIP_PRINTER_ID) && !isSet(env.PRINTNODE_SLIP_PRINTER_ID))
+    ) {
+      warnings.push(
+        "AUTO_PRINT_PACKING_SLIP_POS is enabled but PrintNode POS slip printer config is missing."
+      );
+    }
+  }
+
+  const hasAnyPrintNode = ["PRINTNODE_API_KEY", "PRINTNODE_SLIP_PRINTER_ID", "PRINTNODE_POS_SLIP_PRINTER_ID", "PRINTNODE_LABEL_PRINTER_ID"].some((key) =>
+    isSet(env[key])
+  );
+  if (hasAnyPrintNode && !isSet(env.PRINTNODE_API_KEY)) {
+    warnings.push("PrintNode printer IDs are set but PRINTNODE_API_KEY is missing.");
+  }
+  if (hasAnyPrintNode && !isSet(env.PRINTNODE_LABEL_PRINTER_ID)) {
+    warnings.push("PRINTNODE_LABEL_PRINTER_ID is missing; auto-fulfillment labels will not print.");
+  }
+
+  const easyPostRequired = [
+    "EASYPOST_API_KEY",
+    "SHIP_FROM_LINE1",
+    "SHIP_FROM_CITY",
+    "SHIP_FROM_STATE",
+    "SHIP_FROM_POSTAL_CODE"
+  ];
+  const hasAnyEasyPost = [
+    ...easyPostRequired,
+    "SHIP_FROM_NAME",
+    "SHIP_FROM_PHONE",
+    "SHIP_FROM_EMAIL",
+    "SHIP_FROM_LINE2",
+    "SHIP_FROM_COUNTRY"
+  ].some((key) => isSet(env[key]));
+  if (hasAnyEasyPost) {
+    const missingEasyPost = easyPostRequired.filter((key) => !isSet(env[key]));
+    if (missingEasyPost.length > 0) {
+      warnings.push(`EasyPost is partially configured; missing ${missingEasyPost.join(", ")}.`);
+    }
+  }
+
   const reservationTtl = parseOptionalNumber(env, "CHECKOUT_RESERVATION_TTL_SECONDS");
   if (reservationTtl !== null && reservationTtl < 1800) {
     warnings.push("CHECKOUT_RESERVATION_TTL_SECONDS below 1800 will be clamped to 1800 seconds (30 minutes).");
@@ -183,6 +259,11 @@ function main() {
   const maxMetadataLength = parseOptionalNumber(env, "CHECKOUT_MAX_METADATA_LENGTH");
   if (maxMetadataLength !== null && maxMetadataLength > 500) {
     warnings.push("CHECKOUT_MAX_METADATA_LENGTH above 500 exceeds Stripe metadata limits.");
+  }
+
+  const piiRetentionDays = parseOptionalNumber(env, "ORDER_PII_RETENTION_DAYS");
+  if (piiRetentionDays !== null && piiRetentionDays < 30) {
+    warnings.push("ORDER_PII_RETENTION_DAYS below 30 will be clamped to 30 days.");
   }
 
   if (isSet(env.CHECKOUT_ENFORCE_ORIGIN) && String(env.CHECKOUT_ENFORCE_ORIGIN).toLowerCase() === "false") {

@@ -41,12 +41,7 @@ Set these environment variables before running the app:
 - RATE_LIMIT_CHECKOUT_MAX (optional, default `20`)
 - RATE_LIMIT_CHECKOUT_WINDOW_SECONDS (optional, default `60`)
 
-## Seed KV (optional)
-```bash
-npm run seed:kv
-```
-
-The app now uses `@upstash/redis` directly. If your Vercel integration injects legacy `KV_REST_*` variables, those aliases are still accepted.
+The app uses `@upstash/redis` directly. If your Vercel integration injects legacy `KV_REST_*` variables, those aliases are still accepted.
 
 ## Admin Auth
 - Visit `/admin/login` and sign in with `ADMIN_TOKEN`.
@@ -78,7 +73,7 @@ The app now uses `@upstash/redis` directly. If your Vercel integration injects l
 - `GET /api/pos/products` returns published catalog items for an authenticated in-person POS client.
 - `POST /api/terminal/connection-token` mints Stripe Terminal connection tokens for an authenticated POS session.
 - `POST /api/terminal/create-payment-intent` creates a `card_present` PaymentIntent from server-side product pricing for an authenticated POS session.
-- `POST /api/terminal/capture-payment-intent` captures manual-capture Terminal payments for an authenticated POS session.
+- `POST /api/terminal/cancel-payment-intent` cancels an abandoned Terminal PaymentIntent and releases its inventory hold.
 - Stripe webhook now finalizes both Checkout sessions and LAEM Terminal PaymentIntents into the same inventory/order pipeline.
 - Emergency event-day fallback workflow lives in `docs/laem-pos-emergency-sales-sop.md`.
 

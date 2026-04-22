@@ -174,9 +174,9 @@ Admin access is protected by middleware.ts and lib/require-admin.ts.
   - creates Terminal PaymentIntent
   - reserves inventory for in-person sale
 
-/api/terminal/capture-payment-intent
-  file: app/api/terminal/capture-payment-intent/route.ts
-  purpose: captures manual-capture Terminal payments
+/api/terminal/cancel-payment-intent
+  file: app/api/terminal/cancel-payment-intent/route.ts
+  purpose: cancels abandoned Terminal PaymentIntents and releases reservation holds
 
 
 7. Data Storage in Redis / KV

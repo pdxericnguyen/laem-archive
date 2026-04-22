@@ -10,7 +10,7 @@ import ImageUploadField from "./image-upload-field";
 export const dynamic = "force-dynamic";
 
 type AdminProductsPageProps = {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 type ProductStatus = "live" | "archived" | "hidden";
@@ -33,7 +33,7 @@ const PRODUCT_CATEGORY_OPTIONS: Array<{ value: ProductCategory; label: string }>
 ];
 
 type DeleteErrorCode = "live" | "reserved";
-type SaveErrorCode = "slug_locked" | "invalid_live_price";
+type SaveErrorCode = "slug_locked" | "slug_reserved" | "slug_taken" | "invalid_live_price";
 
 type ProductRow = {
   product: Product;
@@ -101,7 +101,12 @@ function parseDeleteErrorCode(value: string | string[] | undefined): DeleteError
 
 function parseSaveErrorCode(value: string | string[] | undefined): SaveErrorCode | null {
   const raw = typeof value === "string" ? value : Array.isArray(value) ? value[0] : "";
-  return raw === "slug_locked" || raw === "invalid_live_price" ? raw : null;
+  return raw === "slug_locked" ||
+    raw === "slug_reserved" ||
+    raw === "slug_taken" ||
+    raw === "invalid_live_price"
+    ? raw
+    : null;
 }
 
 function parseOptionalPositiveInt(value: string | string[] | undefined) {
@@ -272,6 +277,23 @@ function getSaveErrorMessage(saveError: SaveErrorCode | null, saveSlug: string |
     return null;
   }
 
+  if (saveError === "slug_reserved") {
+    return (
+      <>
+        You can&apos;t rename <code>{saveSlug}</code> while inventory is reserved by an in-progress checkout.
+        Wait for that checkout to complete or expire, then rename it.
+      </>
+    );
+  }
+
+  if (saveError === "slug_taken") {
+    return (
+      <>
+        <code>{saveSlug}</code> is already used by another listing. Choose a unique slug before saving.
+      </>
+    );
+  }
+
   return (
     <>
       You can&apos;t change the slug for <code>{saveSlug}</code> while it is live. Hide or archive the listing first,
@@ -309,13 +331,14 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
       activeCheckoutCount: 0
     }
   }));
+  const resolvedSearchParams = (await searchParams) || {};
   const nowMs = Date.now();
-  const deletedSlug = typeof searchParams?.deleted === "string" ? searchParams.deleted : null;
-  const deleteError = parseDeleteErrorCode(searchParams?.deleteError);
-  const deleteSlug = typeof searchParams?.deleteSlug === "string" ? searchParams.deleteSlug : null;
-  const deleteReservedStock = parseOptionalPositiveInt(searchParams?.deleteReservedStock);
-  const deleteActiveCheckoutCount = parseOptionalPositiveInt(searchParams?.deleteActiveCheckoutCount);
-  const deleteLastExpiresAt = parseOptionalPositiveInt(searchParams?.deleteLastExpiresAt);
+  const deletedSlug = typeof resolvedSearchParams.deleted === "string" ? resolvedSearchParams.deleted : null;
+  const deleteError = parseDeleteErrorCode(resolvedSearchParams.deleteError);
+  const deleteSlug = typeof resolvedSearchParams.deleteSlug === "string" ? resolvedSearchParams.deleteSlug : null;
+  const deleteReservedStock = parseOptionalPositiveInt(resolvedSearchParams.deleteReservedStock);
+  const deleteActiveCheckoutCount = parseOptionalPositiveInt(resolvedSearchParams.deleteActiveCheckoutCount);
+  const deleteLastExpiresAt = parseOptionalPositiveInt(resolvedSearchParams.deleteLastExpiresAt);
   const deleteErrorMessage = getDeleteErrorMessage(
     deleteError,
     deleteSlug,
@@ -326,10 +349,10 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
     },
     nowMs
   );
-  const saveError = parseSaveErrorCode(searchParams?.saveError);
-  const saveSlug = typeof searchParams?.saveSlug === "string" ? searchParams.saveSlug : null;
+  const saveError = parseSaveErrorCode(resolvedSearchParams.saveError);
+  const saveSlug = typeof resolvedSearchParams.saveSlug === "string" ? resolvedSearchParams.saveSlug : null;
   const saveErrorMessage = getSaveErrorMessage(saveError, saveSlug);
-  const activeFilter = parseFilterStatus(searchParams?.status);
+  const activeFilter = parseFilterStatus(resolvedSearchParams.status);
   const filterOptions: FilterOption[] = [
     { value: "all", label: "All" },
     { value: "live", label: "Live" },

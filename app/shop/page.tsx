@@ -9,7 +9,7 @@ export const metadata = { title: "Shop | LAEM Archive" };
 export const dynamic = "force-dynamic";
 
 type ShopPageProps = {
-  searchParams?: Record<string, string | string[] | undefined>;
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
 type CategoryFilter = "all" | ProductCategory;
@@ -124,8 +124,9 @@ export default async function ShopPage({ searchParams }: ShopPageProps) {
     getShopItems(),
     getSiteVisual("shop.banner")
   ]);
-  const activeCategory = parseCategoryFilter(searchParams?.category);
-  const activeFilter = parseAvailabilityFilter(searchParams?.availability);
+  const resolvedSearchParams = (await searchParams) || {};
+  const activeCategory = parseCategoryFilter(resolvedSearchParams.category);
+  const activeFilter = parseAvailabilityFilter(resolvedSearchParams.availability);
   let availableStockBySlug: Record<string, number> = {};
 
   if (items.length > 0) {

@@ -106,10 +106,6 @@ enum AppConfiguration {
         boolValue(for: "LAEMTerminalInternetFailIfInUse") ?? true
     }
 
-    static var allowOfflinePayments: Bool {
-        boolValue(for: "LAEMTerminalAllowOfflinePayments") ?? true
-    }
-
     static var offlineStoredAmountLimitCents: Int? {
         guard let value = numberValue(for: "LAEMTerminalOfflineStoredAmountLimitCents"),
               value > 0 else {

@@ -11,9 +11,9 @@ This folder contains a minimal staff-only iOS POS scaffold for LAEM.
 - Bluetooth discovery and connect flow for Stripe Reader M2
 - Internet discovery and connect flow scaffolding for Stripe Reader S700/S710 style readers
 - Last-reader preference and automatic reconnect attempt during discovery
-- SDK-created PaymentIntents with offline-capable `preferOnline` behavior for device-stored M2 payments
+- Backend-created Terminal PaymentIntents so price, stock reservation, and order metadata come from LAEM
 - Basic disconnect, reconnect, low-battery, and duplicate-operation handling
-- Offline queue status surfaced in the app so staff can see how many payments are still waiting to sync
+- Offline queue status surfaced in the app; payment creation still requires backend reachability before collection
 
 The project now pulls `StripeTerminal` through Swift Package Manager, so there is no vendored SDK copy to keep in the repo.
 
@@ -22,7 +22,7 @@ The project now pulls `StripeTerminal` through Swift Package Manager, so there i
 - Point `LAEMAPIBaseURL` at the running LAEM backend
 - Sign in with the LAEM POS staff passcode that matches `POS_APP_TOKEN` on the backend, or `ADMIN_TOKEN` if you are using the fallback
 - Set `STRIPE_TERMINAL_LOCATION_ID` on the backend for first-time Bluetooth reader connections
-- Enable Stripe Terminal offline mode on the Stripe Terminal Configuration assigned to the Location
+- Enable Stripe Terminal offline mode on the Stripe Terminal Configuration only if you intentionally support stored offline payments later
 - Decide whether to keep `LAEMTerminalUseSimulatedReader` on for local testing
 - Test with a simulated reader first, then with the physical reader you plan to deploy in test mode
 - Keep the event-day fallback notes handy in `docs/laem-pos-emergency-sales-sop.md`
@@ -33,7 +33,6 @@ Edit `Resources/Info.plist`:
 
 - `LAEMAPIBaseURL`
 - `LAEMTerminalCaptureMethod`
-- `LAEMTerminalAllowOfflinePayments`
 - `LAEMTerminalDiscoveryTimeoutSeconds`
 - `LAEMTerminalInternetFailIfInUse`
 - `LAEMTerminalOfflineStoredAmountLimitCents`

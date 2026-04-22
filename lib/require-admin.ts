@@ -14,7 +14,7 @@ export async function requireAdminOrThrow(request?: Request) {
   }
 
   if (!token) {
-    token = cookies().get(ADMIN_SESSION_COOKIE)?.value ?? null;
+    token = (await cookies()).get(ADMIN_SESSION_COOKIE)?.value ?? null;
   }
 
   const isValid = await verifyAdminSessionToken(token);

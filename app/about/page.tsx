@@ -18,9 +18,9 @@ export default async function AboutPage() {
         ) : (
           <div className="relative aspect-[16/9] w-full overflow-hidden bg-neutral-100">
             <img
-              src="https://via.placeholder.com/1600x900"
+              src="/placeholder-product.svg"
               alt="Studio documentation"
-              className="h-full w-full object-cover"
+              className="h-full w-full object-contain p-10"
               loading="lazy"
             />
           </div>

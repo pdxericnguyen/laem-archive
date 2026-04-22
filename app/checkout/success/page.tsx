@@ -4,12 +4,14 @@ export const metadata = {
   title: "Order Received | LAEM Archive"
 };
 
-export default function CheckoutSuccessPage({
+export default async function CheckoutSuccessPage({
   searchParams
 }: {
-  searchParams?: { session_id?: string };
+  searchParams?: Promise<{ session_id?: string }>;
 }) {
-  const sessionId = typeof searchParams?.session_id === "string" ? searchParams.session_id : null;
+  const resolvedSearchParams = await searchParams;
+  const sessionId =
+    typeof resolvedSearchParams?.session_id === "string" ? resolvedSearchParams.session_id : null;
 
   return <SuccessClient sessionId={sessionId} />;
 }

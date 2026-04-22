@@ -24,8 +24,6 @@
     <string>http://localhost:3000/</string>
 	<key>LAEMTerminalCaptureMethod</key>
 	<string>automatic</string>
-	<key>LAEMTerminalAllowOfflinePayments</key>
-	<true/>
 	<key>LAEMTerminalDiscoveryTimeoutSeconds</key>
 	<integer>0</integer>
 	<key>LAEMTerminalInternetFailIfInUse</key>

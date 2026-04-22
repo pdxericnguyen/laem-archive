@@ -41,7 +41,7 @@ Suggested file layout:
 - `GET /api/pos/products`
 - `POST /api/terminal/connection-token`
 - `POST /api/terminal/create-payment-intent`
-- `POST /api/terminal/capture-payment-intent`
+- `POST /api/terminal/cancel-payment-intent`
 - `POST /api/stripe/webhook`
 
 ## Recommended client flow
@@ -49,9 +49,9 @@ Suggested file layout:
 1. Load products from `/api/pos/products`.
 2. Let staff choose product + quantity.
 3. Create a Terminal PaymentIntent via `/api/terminal/create-payment-intent`.
-4. Use Stripe Terminal SDK on iOS to collect the payment method on the reader.
-5. Confirm on-reader.
-6. If using manual capture, call `/api/terminal/capture-payment-intent`.
+4. Retrieve that PaymentIntent in the iOS Stripe Terminal SDK using the returned client secret.
+5. Collect and confirm on-reader.
+6. If collection fails before payment completion, cancel via `/api/terminal/cancel-payment-intent`.
 7. Let the webhook be the source of truth for paid order creation and stock decrement.
 8. Show success or failure in the result screen.
 

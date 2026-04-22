@@ -387,7 +387,7 @@ export async function summarizeReservationHoldsForSlugs(
     let cursor: string | number = "0";
 
     do {
-      const [nextCursor, reservationKeys] = await kv.scan(cursor, {
+      const [nextCursor, reservationKeys]: [string | number, unknown[]] = await kv.scan(cursor, {
         match: `${key.reservation("")}*`,
         count: 100
       });

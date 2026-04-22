@@ -3,6 +3,7 @@
 # Dependencies/build
 node_modules/
 .next/
+tsconfig.tsbuildinfo
 dist/
 ios/build/
 DerivedData/

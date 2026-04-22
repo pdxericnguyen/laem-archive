@@ -22,9 +22,9 @@ struct OrderResultView: View {
     var iconColor: Color {
         switch result {
         case .success:
-            return .green
+            return POSBrand.success
         case .failure:
-            return .red
+            return POSBrand.danger
         }
     }
 
@@ -49,16 +49,22 @@ struct OrderResultView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 18) {
+                Text("ORDER STATUS")
+                    .font(.caption.weight(.semibold))
+                    .tracking(1.4)
+                    .foregroundStyle(POSBrand.textSecondary)
+
                 Image(systemName: iconName)
                     .font(.system(size: 52))
                     .foregroundStyle(iconColor)
 
                 Text(result.title)
                     .font(.title2.weight(.semibold))
+                    .foregroundStyle(POSBrand.textPrimary)
 
                 Text(result.message)
                     .multilineTextAlignment(.center)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(POSBrand.textSecondary)
 
                 if shouldShowReceiptInput {
                     receiptForm
@@ -67,9 +73,10 @@ struct OrderResultView: View {
                 Button("Done") {
                     dismiss()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(POSPrimaryActionStyle())
             }
             .padding(28)
+            .background(POSBrand.pageBackground.ignoresSafeArea())
             .navigationTitle("Order Result")
             .navigationBarTitleDisplayMode(.inline)
         }
@@ -80,12 +87,22 @@ struct OrderResultView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Send receipt")
                 .font(.headline)
+                .foregroundStyle(POSBrand.textPrimary)
 
             TextField("Customer email", text: $receiptEmail)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.emailAddress)
                 .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
+                .background(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .fill(POSBrand.cardBackground)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(POSBrand.cardBorder, lineWidth: 1)
+                )
                 .onSubmit {
                     submitReceiptEmail()
                 }
@@ -101,21 +118,30 @@ struct OrderResultView: View {
                         .frame(maxWidth: .infinity)
                 }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(POSSecondaryActionStyle())
             .disabled(isSendingReceipt)
 
             if let receiptStatusMessage {
                 Label(receiptStatusMessage, systemImage: "checkmark.circle")
                     .font(.footnote)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(POSBrand.success)
             }
 
             if let receiptErrorMessage {
                 Label(receiptErrorMessage, systemImage: "exclamationmark.triangle")
                     .font(.footnote)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(POSBrand.danger)
             }
         }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(POSBrand.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(POSBrand.cardBorder, lineWidth: 1)
+        )
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 

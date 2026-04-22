@@ -42,12 +42,11 @@ struct CreatePaymentIntentResponse: Decodable {
     let expiresAt: Int
 }
 
-struct CapturePaymentIntentResponse: Decodable {
+struct CancelPaymentIntentResponse: Decodable {
     let ok: Bool
     let paymentIntentId: String
     let status: String
-    let amountReceived: Int?
-    let alreadyCaptured: Bool?
+    let reservationReleased: Bool?
 }
 
 struct SendTerminalReceiptPayload: Encodable {
@@ -217,8 +216,8 @@ final class APIClient: @unchecked Sendable {
         return try await send(request)
     }
 
-    func capturePaymentIntent(id: String) async throws -> CapturePaymentIntentResponse {
-        var request = try makeRequest(path: "api/terminal/capture-payment-intent", method: "POST")
+    func cancelPaymentIntent(id: String) async throws -> CancelPaymentIntentResponse {
+        var request = try makeRequest(path: "api/terminal/cancel-payment-intent", method: "POST")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["paymentIntentId": id])
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return try await send(request)

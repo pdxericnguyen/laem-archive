@@ -153,6 +153,28 @@ async function uploadVisualFile(file: File) {
   return payload.url as string;
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await worker(items[index], index);
+      }
+    })
+  );
+
+  return results;
+}
+
 export default function AdminVisualBulkActions({ placements, initialPayloads }: Props) {
   const [working, setWorking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -209,18 +231,34 @@ export default function AdminVisualBulkActions({ placements, initialPayloads }: 
       return;
     }
 
+    const uploadResults = await mapWithConcurrency(
+      Array.from(mappedByPlacement.entries()),
+      3,
+      async ([placement, file]) => {
+        try {
+          const url = await uploadVisualFile(file);
+          return { placement, url, error: null as string | null };
+        } catch (uploadError) {
+          return {
+            placement,
+            url: null,
+            error: uploadError instanceof Error ? uploadError.message : `${file.name} failed`
+          };
+        }
+      }
+    );
+
     let assigned = 0;
     const failed: string[] = [];
-    for (const [placement, file] of mappedByPlacement) {
-      try {
-        const url = await uploadVisualFile(file);
-        if (applyImageUrlToPlacement(placement, url)) {
-          assigned += 1;
-        } else {
-          failed.push(`${placement} (form missing)`);
-        }
-      } catch (uploadError) {
-        failed.push(uploadError instanceof Error ? uploadError.message : `${file.name} failed`);
+    for (const result of uploadResults) {
+      if (result.error || !result.url) {
+        failed.push(result.error || `${result.placement} failed`);
+        continue;
+      }
+      if (applyImageUrlToPlacement(result.placement, result.url)) {
+        assigned += 1;
+      } else {
+        failed.push(`${result.placement} (form missing)`);
       }
     }
 

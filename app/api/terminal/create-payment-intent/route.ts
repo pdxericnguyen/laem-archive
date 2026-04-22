@@ -22,7 +22,7 @@ export const runtime = "nodejs";
 type ParsedRequest = {
   items: Array<{ slug: string; quantity: number }>;
   email: string | null;
-  captureMethod: Stripe.PaymentIntentCreateParams.CaptureMethod;
+  captureMethod: "automatic";
 };
 
 function asPositiveInt(value: string | undefined, fallback: number) {
@@ -33,8 +33,11 @@ function asPositiveInt(value: string | undefined, fallback: number) {
   return Math.max(1, Math.floor(parsed));
 }
 
-function parseCaptureMethod(value: unknown): Stripe.PaymentIntentCreateParams.CaptureMethod {
-  return value === "manual" ? "manual" : "automatic";
+function parseCaptureMethod(value: unknown): "automatic" | null {
+  if (value === undefined || value === null || value === "" || value === "automatic") {
+    return "automatic";
+  }
+  return null;
 }
 
 async function parseRequest(request: Request): Promise<ParsedRequest | null> {
@@ -61,11 +64,15 @@ async function parseRequest(request: Request): Promise<ParsedRequest | null> {
       })();
 
   const email = typeof body.email === "string" && body.email.trim() ? body.email.trim() : null;
+  const captureMethod = parseCaptureMethod(body.captureMethod);
+  if (!captureMethod) {
+    return null;
+  }
 
   return {
     items,
     email,
-    captureMethod: parseCaptureMethod(body.captureMethod)
+    captureMethod
   };
 }
 

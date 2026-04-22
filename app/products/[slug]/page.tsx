@@ -6,8 +6,9 @@ import ProductActions from "./actions";
 export const metadata = { title: "Product | LAEM Archive" };
 export const dynamic = "force-dynamic";
 
-export default async function ProductPage({ params }: { params: { slug: string } }) {
-  const product = await getProduct(params.slug);
+export default async function ProductPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const product = await getProduct(slug);
   if (!product || !product.published) {
     return (
       <main className="mx-auto max-w-6xl px-4 py-10">

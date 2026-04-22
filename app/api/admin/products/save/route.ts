@@ -1,4 +1,4 @@
-import { setStock } from "@/lib/inventory";
+import { setStock, summarizeReservationHoldsForSlugs } from "@/lib/inventory";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import type { Product, ProductCategory } from "@/lib/store";
@@ -112,7 +112,7 @@ function buildRedirectUrl(
   request: Request,
   payload: ProductPayload,
   params?: {
-    saveError?: "slug_locked" | "invalid_live_price";
+    saveError?: "slug_locked" | "slug_reserved" | "slug_taken" | "invalid_live_price";
     saveSlug?: string;
   }
 ) {
@@ -294,8 +294,9 @@ export async function POST(request: Request) {
   const originalSlug = payload.originalSlug || product.slug;
   const index = products.findIndex((item) => item.slug === originalSlug);
   const existingProduct = index >= 0 ? products[index] : null;
+  const isRenaming = originalSlug !== product.slug;
   const isOriginalLive = Boolean(existingProduct?.published) && !Boolean(existingProduct?.archived);
-  if (isOriginalLive && originalSlug !== product.slug) {
+  if (isOriginalLive && isRenaming) {
     const message = "Live listings must be hidden or archived before their slug can be changed.";
     if (wantsJsonResponse(request)) {
       return Response.json(
@@ -315,6 +316,58 @@ export async function POST(request: Request) {
       }),
       303
     );
+  }
+
+  if (isRenaming) {
+    const holdSummaries = await summarizeReservationHoldsForSlugs([originalSlug]);
+    const reservedStock = holdSummaries[originalSlug]?.reservedStock || 0;
+    if (reservedStock > 0) {
+      const message = "Listings with active checkout holds cannot be renamed yet.";
+      if (wantsJson) {
+        return Response.json(
+          {
+            ok: false,
+            error: message,
+            code: "slug_reserved"
+          },
+          { status: 409 }
+        );
+      }
+
+      return Response.redirect(
+        buildRedirectUrl(request, payload, {
+          saveError: "slug_reserved",
+          saveSlug: originalSlug
+        }),
+        303
+      );
+    }
+
+    const targetIndex = products.findIndex((item) => item.slug === product.slug);
+    const directTarget = await kv.get<Product>(key.product(product.slug));
+    const targetTaken =
+      targetIndex >= 0 || Boolean(directTarget && directTarget.slug !== originalSlug);
+    if (targetTaken) {
+      const message = "That slug is already used by another listing.";
+      if (wantsJson) {
+        return Response.json(
+          {
+            ok: false,
+            error: message,
+            code: "slug_taken"
+          },
+          { status: 409 }
+        );
+      }
+
+      return Response.redirect(
+        buildRedirectUrl(request, payload, {
+          saveError: "slug_taken",
+          saveSlug: product.slug
+        }),
+        303
+      );
+    }
   }
 
   if (index >= 0) {

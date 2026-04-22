@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
+import { releaseInventoryReservation } from "@/lib/inventory";
 import { requirePOSOrThrow } from "@/lib/require-pos";
 import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
 
@@ -27,16 +28,26 @@ function jsonError(message: string, status: number, headers: HeadersInit) {
   );
 }
 
+function canCancelPaymentIntent(status: Stripe.PaymentIntent.Status) {
+  return (
+    status === "requires_payment_method" ||
+    status === "requires_confirmation" ||
+    status === "requires_action" ||
+    status === "requires_capture" ||
+    status === "processing"
+  );
+}
+
 export async function POST(request: Request) {
   const rateLimit = await applyRateLimit(request, {
-    namespace: "terminal-capture-payment-intent",
+    namespace: "terminal-cancel-payment-intent",
     limit: asPositiveInt(process.env.RATE_LIMIT_CHECKOUT_MAX, 20),
     windowSeconds: asPositiveInt(process.env.RATE_LIMIT_CHECKOUT_WINDOW_SECONDS, 60)
   });
   const rateLimitHeaders = getRateLimitHeaders(rateLimit);
 
   if (!rateLimit.ok) {
-    return jsonError("Too many capture attempts. Try again shortly.", 429, rateLimitHeaders);
+    return jsonError("Too many terminal cancel attempts. Try again shortly.", 429, rateLimitHeaders);
   }
 
   try {
@@ -68,31 +79,35 @@ export async function POST(request: Request) {
   }
 
   if (existing.status === "succeeded") {
+    return jsonError("Payment already succeeded and cannot be canceled.", 409, rateLimitHeaders);
+  }
+
+  if (existing.status === "canceled") {
+    const release = await releaseInventoryReservation(paymentIntentId);
     return NextResponse.json(
       {
         ok: true,
-        paymentIntentId: existing.id,
-        status: existing.status,
-        alreadyCaptured: true
+        paymentIntentId,
+        status: "canceled",
+        reservationReleased: release.ok
       },
-      {
-        headers: rateLimitHeaders
-      }
+      { headers: rateLimitHeaders }
     );
   }
 
-  if (existing.status !== "requires_capture") {
-    return jsonError(`Payment intent cannot be captured from status ${existing.status}`, 409, rateLimitHeaders);
+  if (!canCancelPaymentIntent(existing.status)) {
+    return jsonError(`Payment intent cannot be canceled from status ${existing.status}`, 409, rateLimitHeaders);
   }
 
-  const captured = await stripe.paymentIntents.capture(paymentIntentId);
+  const canceled = await stripe.paymentIntents.cancel(paymentIntentId);
+  const release = await releaseInventoryReservation(paymentIntentId);
 
   return NextResponse.json(
     {
       ok: true,
-      paymentIntentId: captured.id,
-      status: captured.status,
-      amountReceived: captured.amount_received
+      paymentIntentId: canceled.id,
+      status: canceled.status,
+      reservationReleased: release.ok
     },
     {
       headers: rateLimitHeaders

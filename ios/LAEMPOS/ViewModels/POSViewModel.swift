@@ -228,8 +228,10 @@ final class POSViewModel: ObservableObject {
                 captureMethod: AppConfiguration.defaultCaptureMethod
             )
 
-            if terminalResult.requiresCapture, let stripePaymentIntentId = terminalResult.stripePaymentIntentId {
-                _ = try await apiClient.capturePaymentIntent(id: stripePaymentIntentId)
+            if terminalResult.requiresCapture {
+                throw APIClientError.server(
+                    message: "Payment authorized but not captured. Check Stripe before starting another sale."
+                )
             }
 
             checkoutResult = .success(

@@ -18,7 +18,7 @@ function isWriteMethod(method: string) {
   return method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
   if (!isAdminApiPath(pathname) && !isAdminPagePath(pathname)) {

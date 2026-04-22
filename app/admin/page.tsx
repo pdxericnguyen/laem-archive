@@ -1,7 +1,7 @@
 import AdminCommandPalette from "./command-palette";
 import AdminSystemHealthBanner from "./system-health-banner";
 import { hasKvEnv, key, kv } from "@/lib/kv";
-import { readOrder } from "@/lib/orders";
+import { readOrder, type OrderRecord } from "@/lib/orders";
 import { getLowStockThreshold } from "@/lib/inventory";
 
 export const metadata = { title: "Admin | LAEM Archive" };
@@ -22,7 +22,9 @@ async function getDashboardStats() {
   const startOfDayUnix = Math.floor(startOfDayLocal.getTime() / 1000);
 
   const orderIds = (await kv.lrange<string>(key.ordersIndex, 0, 399)) || [];
-  const orders = (await Promise.all(orderIds.map((id) => readOrder(id)))).filter(Boolean);
+  const orders = (await Promise.all(orderIds.map((id) => readOrder(id)))).filter(
+    (order): order is OrderRecord => Boolean(order)
+  );
 
   const paidToday = orders.filter((order) => order.status === "paid" && order.created >= startOfDayUnix).length;
   const unfulfilled = orders.filter((order) => order.status === "paid").length;

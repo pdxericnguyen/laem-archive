@@ -43,6 +43,28 @@ function isLikelyImageFile(file: File) {
   return /\.(avif|gif|heic|heif|jpe?g|png|svg|webp)$/i.test(file.name);
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  worker: (item: T, index: number) => Promise<R>
+) {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, limit), items.length);
+
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex;
+        nextIndex += 1;
+        results[index] = await worker(items[index], index);
+      }
+    })
+  );
+
+  return results;
+}
+
 export default function ImageUploadField({
   name,
   defaultValue = "",
@@ -96,8 +118,7 @@ export default function ImageUploadField({
     setMessage(null);
 
     try {
-      const uploadedUrls: string[] = [];
-      for (const file of files) {
+      const uploadedUrls = await mapWithConcurrency(files, 3, async (file) => {
         const formData = new FormData();
         formData.append("file", file);
         formData.append("folder", uploadFolder);
@@ -111,8 +132,8 @@ export default function ImageUploadField({
           throw new Error(payload?.error || "Upload failed");
         }
 
-        uploadedUrls.push(payload.url);
-      }
+        return payload.url as string;
+      });
 
       setValue((current) => (allowMultiple ? appendLines(current, uploadedUrls) : uploadedUrls[0] || current));
       if (imageUrls.length === 0 && uploadedUrls.length > 0) {

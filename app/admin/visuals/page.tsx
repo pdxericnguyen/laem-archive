@@ -15,12 +15,12 @@ export const metadata = { title: "Site Visuals | LAEM Archive" };
 export const dynamic = "force-dynamic";
 
 type AdminVisualsPageProps = {
-  searchParams?: {
+  searchParams?: Promise<{
     saved?: string;
     deleted?: string;
     visualError?: string;
     placement?: string;
-  };
+  }>;
 };
 
 type VisualPayload = {
@@ -35,7 +35,7 @@ type VisualPayload = {
   published: boolean;
 };
 
-function getMessage(searchParams: AdminVisualsPageProps["searchParams"]) {
+function getMessage(searchParams: Awaited<NonNullable<AdminVisualsPageProps["searchParams"]>> | undefined) {
   if (searchParams?.visualError === "missing_image") {
     return {
       kind: "error" as const,
@@ -96,7 +96,8 @@ export default async function AdminVisualsPage({ searchParams }: AdminVisualsPag
   }
 
   const visualsByPlacement = await getSiteVisualsForAdmin();
-  const message = getMessage(searchParams);
+  const resolvedSearchParams = await searchParams;
+  const message = getMessage(resolvedSearchParams);
   const initialPayloads = Object.fromEntries(
     SITE_VISUAL_PLACEMENTS.map((definition) => [
       definition.placement,

@@ -14,6 +14,7 @@ struct ReaderSheetView: View {
                                 Text(family.displayName)
                                 Text(family.detailLabel)
                                     .font(.caption)
+                                    .foregroundStyle(POSBrand.textSecondary)
                             }
                             .tag(family)
                         }
@@ -60,7 +61,7 @@ struct ReaderSheetView: View {
                         Text(terminalManager.isSDKInstalled
                              ? terminalManager.selectedReaderFamily.emptyStateText
                              : "Add the StripeTerminal package first, then this sheet can discover supported Stripe readers.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(POSBrand.textSecondary)
                     } else {
                         ForEach(terminalManager.discoveredReaders) { reader in
                             Button {
@@ -72,7 +73,7 @@ struct ReaderSheetView: View {
                                     Text(reader.label)
                                     Text(reader.detail)
                                         .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(POSBrand.textSecondary)
                                 }
                             }
                             .disabled(terminalManager.isBusy && terminalManager.connectedReader?.id != reader.id)
@@ -82,13 +83,16 @@ struct ReaderSheetView: View {
 
                 Section("Notes") {
                     Text(terminalManager.selectedReaderFamily.setupNote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(POSBrand.textSecondary)
                     Text("Offline mode is enabled. When connectivity drops, Stripe Terminal can store eligible M2 payments on this device and forward them when the network returns.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(POSBrand.textSecondary)
                     Text("LAEM can support both mobile and smart readers across different staff devices, but each app session should control only one connected reader at a time.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(POSBrand.textSecondary)
                 }
             }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(POSBrand.pageBackground)
             .navigationTitle("Reader Setup")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
