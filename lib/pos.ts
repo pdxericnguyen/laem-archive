@@ -1,3 +1,8 @@
+import {
+  getCheckoutLimitsFromEnv,
+  validateCartMetadataSize,
+  validateCheckoutLimits
+} from "@/lib/checkout-validation";
 import { getAvailableStock, getProduct } from "@/lib/inventory";
 import { getShopItems } from "@/lib/store";
 
@@ -36,12 +41,22 @@ type ResolvePOSCartResult =
       available?: number;
     };
 
+const MIN_POS_UNIT_AMOUNT_CENTS = 50;
+const MAX_POS_UNIT_AMOUNT_CENTS = 99_999_999;
+
 function asPositiveInt(value: unknown, fallback: number) {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed)) {
     return fallback;
   }
-  return Math.max(1, Math.floor(parsed));
+  return Math.floor(parsed);
+}
+
+function formatPOSLimitError(message: string) {
+  return message
+    .replace("unique items in checkout", "unique items in POS cart")
+    .replace("total units in checkout", "total POS units")
+    .replace("checkout session metadata", "POS payment metadata");
 }
 
 export function getPosCurrency() {
@@ -79,6 +94,27 @@ export function serializePOSCartMetadata(items: POSCartItem[]) {
   return collapsePOSCartItems(items)
     .map((item) => `${item.slug}:${item.quantity}`)
     .join(",");
+}
+
+export function validatePOSCartPayload(items: POSCartItem[]) {
+  const limits = getCheckoutLimitsFromEnv();
+  const limitError = validateCheckoutLimits(items, limits);
+  if (limitError) {
+    return {
+      ok: false as const,
+      error: formatPOSLimitError(limitError)
+    };
+  }
+
+  const metadataResult = validateCartMetadataSize(items, limits);
+  if (!metadataResult.ok) {
+    return metadataResult;
+  }
+
+  return {
+    ok: true as const,
+    cartMetadata: metadataResult.cartMetadata
+  };
 }
 
 export function parsePOSCartMetadata(value: string | null | undefined): POSCartItem[] {
@@ -155,10 +191,20 @@ export async function resolvePOSCartItems(input: POSCartItem[]): Promise<Resolve
       };
     }
 
+    const priceCents = Math.max(0, Math.floor(product.priceCents || 0));
+    if (priceCents < MIN_POS_UNIT_AMOUNT_CENTS || priceCents > MAX_POS_UNIT_AMOUNT_CENTS) {
+      return {
+        ok: false,
+        error: `Product ${requested.slug} has invalid POS price. Re-save the admin price and try again.`,
+        status: 400,
+        failedSlug: requested.slug
+      };
+    }
+
     resolved.push({
       slug: requested.slug,
       quantity: requested.quantity,
-      priceCents: product.priceCents,
+      priceCents,
       title: product.title
     });
   }

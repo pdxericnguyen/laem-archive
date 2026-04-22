@@ -201,7 +201,7 @@ final class POSViewModel: ObservableObject {
             return
         }
 
-        guard let apiClient else {
+        guard apiClient != nil else {
             notice = Notice(
                 style: .error,
                 message: "Set LAEMAPIBaseURL before using the live payment flow."
@@ -222,6 +222,7 @@ final class POSViewModel: ObservableObject {
         defer { isCharging = false }
 
         do {
+            let amountText = formattedTotal
             let terminalResult = try await terminalManager.collectPayment(
                 lines: cartLines,
                 email: nil,
@@ -236,22 +237,28 @@ final class POSViewModel: ObservableObject {
 
             checkoutResult = .success(
                 reference: terminalResult.reference,
-                amountText: formattedTotal,
+                amountText: amountText,
                 storedOffline: terminalResult.storedOffline,
                 paymentIntentId: terminalResult.stripePaymentIntentId
             )
             clearCart()
+            let refreshError = await refreshProductsSilently()
             notice = Notice(
-                style: terminalResult.storedOffline ? .warning : .info,
-                message: terminalResult.storedOffline
-                    ? "Payment stored on this device. Reconnect to the internet so Stripe can forward it."
-                    : "Payment completed successfully."
+                style: terminalResult.storedOffline || refreshError != nil ? .warning : .info,
+                message: refreshError.map {
+                    "Payment completed, but the catalog could not refresh. \($0)"
+                } ?? (
+                    terminalResult.storedOffline
+                        ? "Payment stored on this device. Reconnect to the internet so Stripe can forward it."
+                        : "Payment completed successfully. Catalog refreshed."
+                )
             )
         } catch {
             if let apiError = error as? APIClientError, apiError == .unauthorized {
                 handleUnauthorizedSession()
                 return
             }
+            _ = await refreshProductsSilently()
             checkoutResult = .failure(message: error.localizedDescription)
             notice = Notice(style: .error, message: error.localizedDescription)
         }
@@ -296,6 +303,21 @@ final class POSViewModel: ObservableObject {
             return nil
         }
         return products
+    }
+
+    private func refreshProductsSilently() async -> String? {
+        guard let apiClient else {
+            return nil
+        }
+
+        do {
+            let remoteProducts = try await apiClient.fetchProducts(treatUnauthorizedAsSessionLoss: false)
+            products = remoteProducts
+            saveCachedProducts(remoteProducts)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     private static func isValidEmail(_ value: String) -> Bool {

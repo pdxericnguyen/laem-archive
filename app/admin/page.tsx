@@ -93,6 +93,12 @@ export default async function AdminHome() {
         </a>
         <a
           className="border border-neutral-300 px-4 h-11 inline-flex items-center no-underline hover:bg-neutral-50"
+          href="/admin/reconciliation"
+        >
+          Reconciliation
+        </a>
+        <a
+          className="border border-neutral-300 px-4 h-11 inline-flex items-center no-underline hover:bg-neutral-50"
           href="/admin/visuals"
         >
           Site Visuals

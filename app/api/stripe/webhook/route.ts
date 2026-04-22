@@ -8,6 +8,7 @@ import {
   syncProductStockAndArchiveState,
   type StockRequest
 } from "@/lib/inventory";
+import { recordInventoryLedgerEvent } from "@/lib/inventory-ledger";
 import {
   acquireOrderProcessingLock,
   appendOrderToIndex,
@@ -269,6 +270,20 @@ async function finalizeSuccessfulOrder(params: FinalizeOrderParams) {
       await writeOrder(conflictOrder);
       await appendOrderToIndex(params.id);
 
+      if (failedSlug) {
+        await recordInventoryLedgerEvent({
+          slug: failedSlug,
+          kind: "stock_conflict",
+          source: params.channel,
+          referenceId: params.id,
+          quantity: totalQuantity,
+          stockBefore: available,
+          stockAfter: available,
+          stockDelta: 0,
+          note: "Paid order could not decrement because stock was unavailable."
+        });
+      }
+
       console.error("Insufficient stock during webhook processing", {
         orderId: params.id,
         failedSlug,
@@ -300,6 +315,21 @@ async function finalizeSuccessfulOrder(params: FinalizeOrderParams) {
     for (const item of stockResult.items) {
       await syncProductStockAndArchiveState(item.slug, item.next);
     }
+
+    await Promise.all(
+      stockResult.items.map((item) =>
+        recordInventoryLedgerEvent({
+          slug: item.slug,
+          kind: "stock_sold",
+          source: params.channel,
+          referenceId: params.id,
+          quantity: item.requested,
+          stockBefore: item.current,
+          stockAfter: item.next,
+          stockDelta: item.next - item.current
+        })
+      )
+    );
 
     let orderRecord: Parameters<typeof writeOrder>[0] = {
       id: params.id,

@@ -52,6 +52,8 @@ export const key = {
   ordersIndex: "orders:index",
   reservation: (sessionId: string) => `reservation:${sessionId}`,
   reservationsExpiring: "reservations:expiring",
+  inventoryLedger: "inventory:ledger",
+  inventoryLedgerBySlug: (slug: string) => `inventory:ledger:${slug}`,
   archived: (slug: string) => `archived:${slug}`,
   published: (slug: string) => `published:${slug}`,
   siteVisual: (placement: string) => `site-visual:${placement}`

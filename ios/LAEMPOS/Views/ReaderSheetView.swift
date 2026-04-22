@@ -3,6 +3,8 @@ import SwiftUI
 struct ReaderSheetView: View {
     @ObservedObject var terminalManager: LAEMTerminalManager
     @Environment(\.dismiss) private var dismiss
+    @State private var readerActionMessage: String?
+    @State private var readerErrorMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -33,9 +35,25 @@ struct ReaderSheetView: View {
                     LabeledContent("Stored amount", value: terminalManager.offlineStoredAmountSummary)
                 }
 
+                if readerActionMessage != nil || readerErrorMessage != nil {
+                    Section("Last Action") {
+                        if let readerActionMessage {
+                            Label(readerActionMessage, systemImage: "checkmark.circle")
+                                .foregroundStyle(POSBrand.success)
+                        }
+
+                        if let readerErrorMessage {
+                            Label(readerErrorMessage, systemImage: "exclamationmark.triangle")
+                                .foregroundStyle(POSBrand.danger)
+                        }
+                    }
+                }
+
                 Section("Actions") {
                     Button(terminalManager.status == .discovering ? "Restart Reader Discovery" : "Start Reader Discovery") {
                         Task {
+                            readerErrorMessage = nil
+                            readerActionMessage = "Searching for readers..."
                             await terminalManager.beginDiscovery()
                         }
                     }
@@ -44,6 +62,8 @@ struct ReaderSheetView: View {
                     if terminalManager.status == .discovering || !terminalManager.discoveredReaders.isEmpty {
                         Button("Stop Discovery") {
                             terminalManager.stopDiscovery()
+                            readerActionMessage = "Reader discovery stopped."
+                            readerErrorMessage = nil
                         }
                     }
 
@@ -51,6 +71,13 @@ struct ReaderSheetView: View {
                         Button("Disconnect Reader", role: .destructive) {
                             Task {
                                 await terminalManager.disconnectReader()
+                                if terminalManager.connectedReader == nil {
+                                    readerActionMessage = "Reader disconnected."
+                                    readerErrorMessage = nil
+                                } else {
+                                    readerActionMessage = nil
+                                    readerErrorMessage = terminalManager.statusDetail
+                                }
                             }
                         }
                     }
@@ -66,7 +93,15 @@ struct ReaderSheetView: View {
                         ForEach(terminalManager.discoveredReaders) { reader in
                             Button {
                                 Task {
-                                    try? await terminalManager.connect(to: reader)
+                                    readerErrorMessage = nil
+                                    readerActionMessage = "Connecting to \(reader.label)..."
+                                    do {
+                                        try await terminalManager.connect(to: reader)
+                                        readerActionMessage = "Connected to \(reader.label)."
+                                    } catch {
+                                        readerActionMessage = nil
+                                        readerErrorMessage = error.localizedDescription
+                                    }
                                 }
                             } label: {
                                 VStack(alignment: .leading, spacing: 4) {

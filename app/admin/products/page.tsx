@@ -600,6 +600,12 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                   <p className="text-xs text-neutral-500">
                     <code>{product.slug}</code>
                   </p>
+                  <a
+                    href={`/admin/reconciliation?slug=${encodeURIComponent(product.slug)}`}
+                    className="inline-flex text-xs font-semibold text-neutral-700 underline"
+                  >
+                    View stock timeline
+                  </a>
                 </div>
                 <span
                   className={`inline-flex items-center border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${statusBadge.className}`}

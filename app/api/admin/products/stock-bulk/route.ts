@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { setStock, syncProductStockAndArchiveState } from "@/lib/inventory";
+import { getStock, setStock, syncProductStockAndArchiveState } from "@/lib/inventory";
+import { recordInventoryLedgerEvent } from "@/lib/inventory-ledger";
 import { hasKvEnv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 
@@ -52,8 +53,22 @@ export async function POST(request: Request) {
   let autoArchived = 0;
 
   for (const update of updates) {
+    const previousStock = await getStock(update.slug);
     await setStock(update.slug, update.stock);
     const synced = await syncProductStockAndArchiveState(update.slug, update.stock);
+    if (previousStock !== update.stock) {
+      await recordInventoryLedgerEvent({
+        slug: update.slug,
+        kind: "stock_adjusted",
+        source: "admin",
+        referenceId: update.slug,
+        quantity: Math.abs(update.stock - previousStock),
+        stockBefore: previousStock,
+        stockAfter: update.stock,
+        stockDelta: update.stock - previousStock,
+        note: "Bulk stock update."
+      });
+    }
     if (synced?.autoArchiveOnZero && synced.archived && update.stock <= 0) {
       autoArchived += 1;
     }

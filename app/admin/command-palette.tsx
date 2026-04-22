@@ -12,6 +12,7 @@ type Command = {
 
 const COMMANDS: Command[] = [
   { id: "admin", label: "Go to Admin Home", href: "/admin", keywords: "dashboard home" },
+  { id: "reconciliation", label: "Go to Reconciliation", href: "/admin/reconciliation", keywords: "reconcile inventory timeline stripe payments" },
   { id: "orders", label: "Go to Orders", href: "/admin/orders", keywords: "orders fulfillment shipping" },
   { id: "products", label: "Go to Products", href: "/admin/products", keywords: "catalog stock inventory" },
   { id: "visuals", label: "Go to Site Visuals", href: "/admin/visuals", keywords: "visuals campaign banners" }
@@ -81,6 +82,11 @@ export default function AdminCommandPalette() {
           setPendingGoto(false);
           return;
         }
+        if (key === "r") {
+          router.push("/admin/reconciliation");
+          setPendingGoto(false);
+          return;
+        }
       }
 
       if (open && key === "escape") {
@@ -109,7 +115,7 @@ export default function AdminCommandPalette() {
         >
           Jump (Cmd/Ctrl+K)
         </button>
-        <span>Shortcuts: `g o` Orders, `g p` Products, `g v` Visuals</span>
+        <span>Shortcuts: `g o` Orders, `g p` Products, `g v` Visuals, `g r` Reconcile</span>
       </div>
 
       {open ? (

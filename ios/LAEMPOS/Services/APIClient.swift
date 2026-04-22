@@ -194,9 +194,12 @@ final class APIClient: @unchecked Sendable {
         clearAuthToken()
     }
 
-    func fetchProducts() async throws -> [Product] {
+    func fetchProducts(treatUnauthorizedAsSessionLoss: Bool = true) async throws -> [Product] {
         let request = try makeRequest(path: "api/pos/products", method: "GET")
-        let envelope: ProductsEnvelope = try await send(request)
+        let envelope: ProductsEnvelope = try await send(
+            request,
+            treatUnauthorizedAsSessionLoss: treatUnauthorizedAsSessionLoss
+        )
         return envelope.products
     }
 

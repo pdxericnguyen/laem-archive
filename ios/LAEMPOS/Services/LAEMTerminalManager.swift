@@ -389,14 +389,14 @@ final class LAEMTerminalManager: NSObject, ObservableObject {
             statusDetail = "Connected and ready for the next sale."
 
             return TerminalProcessResult(
-                reference: resolvedID ?? localReference,
+                reference: resolvedID,
                 stripePaymentIntentId: resolvedID,
                 requiresCapture: requiresCapture,
                 storedOffline: storedOffline
             )
         } catch {
             if let serverPaymentIntentId {
-                try? await apiClient.cancelPaymentIntent(id: serverPaymentIntentId)
+                _ = try? await apiClient.cancelPaymentIntent(id: serverPaymentIntentId)
             }
             pendingPaymentIntentID = nil
             refreshBusyState()

@@ -1,4 +1,5 @@
-import { setStock, summarizeReservationHoldsForSlugs } from "@/lib/inventory";
+import { getStock, setStock, summarizeReservationHoldsForSlugs } from "@/lib/inventory";
+import { recordInventoryLedgerEvent } from "@/lib/inventory-ledger";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import type { Product, ProductCategory } from "@/lib/store";
@@ -294,6 +295,7 @@ export async function POST(request: Request) {
   const originalSlug = payload.originalSlug || product.slug;
   const index = products.findIndex((item) => item.slug === originalSlug);
   const existingProduct = index >= 0 ? products[index] : null;
+  const previousStock = existingProduct ? await getStock(originalSlug) : null;
   const isRenaming = originalSlug !== product.slug;
   const isOriginalLive = Boolean(existingProduct?.published) && !Boolean(existingProduct?.archived);
   if (isOriginalLive && isRenaming) {
@@ -379,6 +381,19 @@ export async function POST(request: Request) {
   await kv.set(key.products, products);
   await kv.set(key.product(product.slug), product);
   await setStock(product.slug, product.stock);
+  if ((previousStock ?? 0) !== product.stock) {
+    await recordInventoryLedgerEvent({
+      slug: product.slug,
+      kind: "stock_adjusted",
+      source: "admin",
+      referenceId: product.slug,
+      quantity: Math.abs(product.stock - (previousStock ?? 0)),
+      stockBefore: previousStock ?? 0,
+      stockAfter: product.stock,
+      stockDelta: product.stock - (previousStock ?? 0),
+      note: existingProduct ? "Product saved in admin." : "Product created in admin."
+    });
+  }
   await kv.set(key.published(product.slug), product.published);
   await kv.set(key.archived(product.slug), product.archived);
   if (originalSlug !== product.slug) {

@@ -12,7 +12,7 @@ import {
   getPOSTotal,
   normalizePOSCartItem,
   resolvePOSCartItems,
-  serializePOSCartMetadata
+  validatePOSCartPayload
 } from "@/lib/pos";
 import { requirePOSOrThrow } from "@/lib/require-pos";
 import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
@@ -124,6 +124,11 @@ export async function POST(request: Request) {
     return jsonError("Invalid request payload", 400, rateLimitHeaders);
   }
 
+  const payloadValidation = validatePOSCartPayload(parsed.items);
+  if (!payloadValidation.ok) {
+    return jsonError(payloadValidation.error, 400, rateLimitHeaders);
+  }
+
   const resolved = await resolvePOSCartItems(parsed.items);
   if (resolved.ok === false) {
     return jsonError(resolved.error, resolved.status, rateLimitHeaders);
@@ -148,7 +153,7 @@ export async function POST(request: Request) {
     receipt_email: parsed.email || undefined,
     metadata: {
       source: "laem_pos_terminal",
-      cart: serializePOSCartMetadata(resolved.items),
+      cart: payloadValidation.cartMetadata,
       quantity_total: String(totalQuantity),
       ...(singleSlug ? { slug: singleSlug } : {})
     }

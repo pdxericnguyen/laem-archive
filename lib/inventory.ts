@@ -1,3 +1,4 @@
+import { recordInventoryLedgerEvent } from "@/lib/inventory-ledger";
 import { key, kv } from "@/lib/kv";
 import type { Product } from "@/lib/store";
 
@@ -271,6 +272,72 @@ function getStockTransition(previous: number, next: number): StockTransition | n
   return null;
 }
 
+async function recordReservationCreatedEvents(
+  sessionId: string,
+  requests: StockRequest[],
+  expiresAt: number
+) {
+  await Promise.all(
+    requests.map(async (request) => {
+      const reservedAfter = await getReservedStock(request.slug);
+      return recordInventoryLedgerEvent({
+        slug: request.slug,
+        kind: "reservation_created",
+        source: sessionId.startsWith("pi_") ? "terminal" : "checkout",
+        referenceId: sessionId,
+        quantity: request.quantity,
+        reservedBefore: Math.max(0, reservedAfter - request.quantity),
+        reservedAfter,
+        reservedDelta: request.quantity,
+        note: `Hold expires at ${expiresAt}.`
+      });
+    })
+  );
+}
+
+async function recordReservationReleasedEvents(
+  sessionId: string,
+  reservation: CheckoutReservationRecord,
+  nextStatus: CheckoutReservationStatus
+) {
+  await Promise.all(
+    reservation.items.map(async (item) => {
+      const reservedAfter = await getReservedStock(item.slug);
+      return recordInventoryLedgerEvent({
+        slug: item.slug,
+        kind: nextStatus === "expired" ? "reservation_expired" : "reservation_released",
+        source: sessionId.startsWith("pi_") ? "terminal" : "checkout",
+        referenceId: sessionId,
+        quantity: item.quantity,
+        reservedBefore: reservedAfter + item.quantity,
+        reservedAfter,
+        reservedDelta: -item.quantity
+      });
+    })
+  );
+}
+
+async function recordReservationCompletedEvents(
+  sessionId: string,
+  reservation: CheckoutReservationRecord
+) {
+  await Promise.all(
+    reservation.items.map(async (item) => {
+      const reservedAfter = await getReservedStock(item.slug);
+      return recordInventoryLedgerEvent({
+        slug: item.slug,
+        kind: "reservation_completed",
+        source: sessionId.startsWith("pi_") ? "terminal" : "checkout",
+        referenceId: sessionId,
+        quantity: item.quantity,
+        reservedBefore: reservedAfter + item.quantity,
+        reservedAfter,
+        reservedDelta: -item.quantity
+      });
+    })
+  );
+}
+
 async function ensureStockKey(slug: string) {
   const existing = await kv.get<number>(key.stock(slug));
   if (typeof existing === "number" && Number.isFinite(existing)) {
@@ -524,6 +591,11 @@ export async function reserveInventoryForCheckoutSession(
     return { ok: false, reason: "invalid_request" };
   }
 
+  const existingReservation = await readInventoryReservation(sessionId);
+  if (existingReservation?.status === "active") {
+    return { ok: true, expiresAt: existingReservation.expiresAt };
+  }
+
   for (const request of requests) {
     await ensureStockKey(request.slug);
   }
@@ -595,6 +667,7 @@ return {1, 0, 0}
     if (Array.isArray(response)) {
       const ok = parseNumberResult(response[0]) === 1;
       if (ok) {
+        await recordReservationCreatedEvents(sessionId, requests, ttlExpiry);
         return { ok: true, expiresAt: ttlExpiry };
       }
       const failedIndex = Math.max(1, Math.floor(parseNumberResult(response[1])));
@@ -613,11 +686,6 @@ return {1, 0, 0}
       sessionId,
       requests
     });
-  }
-
-  const existing = await readInventoryReservation(sessionId);
-  if (existing?.status === "active") {
-    return { ok: true, expiresAt: existing.expiresAt };
   }
 
   for (const request of requests) {
@@ -641,6 +709,7 @@ return {1, 0, 0}
     member: sessionId
   });
   await kv.expireat(key.reservation(sessionId), ttlExpiry + 604800);
+  await recordReservationCreatedEvents(sessionId, requests, ttlExpiry);
 
   return { ok: true, expiresAt: ttlExpiry };
 }
@@ -708,6 +777,7 @@ return {1}
 
   try {
     await kv.eval(script, keys, args);
+    await recordReservationReleasedEvents(sessionId, reservation, nextStatus);
     return { ok: true, status: "released", reservation };
   } catch (error) {
     console.error("Inventory reservation release eval failed; falling back to sequential release", {
@@ -726,6 +796,7 @@ return {1}
     buildReservationHash(sessionId, reservation.items, nextStatus, reservation.createdAt, reservation.expiresAt, updatedAt)
   );
   await kv.zrem(key.reservationsExpiring, sessionId);
+  await recordReservationReleasedEvents(sessionId, reservation, nextStatus);
   return { ok: true, status: "released", reservation };
 }
 
@@ -841,7 +912,7 @@ return out
   try {
     const response = (await kv.eval(script, keys, args)) as unknown;
     if (Array.isArray(response) && parseNumberResult(response[0]) === 1) {
-      return {
+      const result: ConsumeInventoryReservationResult = {
         ok: true,
         source: "reservation",
         items: reservation.items.map((item, index) => {
@@ -853,6 +924,8 @@ return out
           };
         })
       };
+      await recordReservationCompletedEvents(sessionId, reservation);
+      return result;
     }
   } catch (error) {
     console.error("Reservation consume eval failed; falling back to sequential consume", {
@@ -880,6 +953,7 @@ return out
     buildReservationHash(sessionId, reservation.items, "completed", reservation.createdAt, reservation.expiresAt, updatedAt)
   );
   await kv.zrem(key.reservationsExpiring, sessionId);
+  await recordReservationCompletedEvents(sessionId, reservation);
 
   return {
     ok: true,

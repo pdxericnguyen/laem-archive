@@ -255,6 +255,10 @@ struct POSRootView: View {
             Section {
                 if viewModel.isLoadingProducts {
                     ProgressView("Loading products...")
+                } else if viewModel.products.isEmpty {
+                    Text("No live products are available in the POS catalog. Refresh after publishing stock in admin.")
+                        .font(.subheadline)
+                        .foregroundStyle(POSBrand.textSecondary)
                 } else {
                     ForEach(viewModel.products) { product in
                         ProductRow(
@@ -367,6 +371,12 @@ struct POSRootView: View {
                             if viewModel.isCharging {
                                 ProgressView()
                                     .frame(maxWidth: .infinity)
+                            } else if viewModel.cartLines.isEmpty {
+                                Label("Add Items to Charge", systemImage: "cart")
+                                    .frame(maxWidth: .infinity)
+                            } else if !terminalManager.canBeginCheckout {
+                                Label("Connect Reader", systemImage: "dot.radiowaves.left.and.right")
+                                    .frame(maxWidth: .infinity)
                             } else {
                                 Label("Charge \(viewModel.formattedTotal)", systemImage: "creditcard")
                                     .frame(maxWidth: .infinity)
@@ -397,6 +407,17 @@ private struct ProductRow: View {
     let onAdd: () -> Void
     let onRemove: () -> Void
 
+    private var stockStatusText: String {
+        guard product.published && !product.archived else {
+            return "Unavailable"
+        }
+        return product.stock > 0 ? "\(product.stock) in stock" : "Out of stock"
+    }
+
+    private var stockStatusTint: Color {
+        product.isAvailableForSale ? POSBrand.textSecondary : POSBrand.danger
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
@@ -406,11 +427,11 @@ private struct ProductRow: View {
                 Text(product.formattedPrice)
                     .font(.subheadline)
                     .foregroundStyle(POSBrand.textSecondary)
-                Text(product.stock > 0 ? "\(product.stock) in stock" : "Out of stock")
+                Text(stockStatusText)
                     .font(.caption)
                     .textCase(.uppercase)
                     .tracking(0.8)
-                    .foregroundStyle(product.stock > 0 ? AnyShapeStyle(POSBrand.textSecondary) : AnyShapeStyle(POSBrand.danger))
+                    .foregroundStyle(stockStatusTint)
             }
 
             Spacer()
@@ -438,6 +459,7 @@ private struct ProductRow: View {
             }
         }
         .padding(.vertical, 6)
+        .opacity(product.isAvailableForSale ? 1 : 0.58)
     }
 }
 

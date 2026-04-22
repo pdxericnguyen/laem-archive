@@ -89,6 +89,10 @@ struct OrderResultView: View {
                 .font(.headline)
                 .foregroundStyle(POSBrand.textPrimary)
 
+            Text("Ask for the customer email after payment. If they do not want a receipt, leave this blank and tap Done.")
+                .font(.footnote)
+                .foregroundStyle(POSBrand.textSecondary)
+
             TextField("Customer email", text: $receiptEmail)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.emailAddress)
@@ -114,7 +118,7 @@ struct OrderResultView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                 } else {
-                    Text("Send Receipt")
+                    Text(receiptStatusMessage == nil ? "Send Receipt" : "Update Receipt Email")
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -173,7 +177,7 @@ struct OrderResultView: View {
                 await MainActor.run {
                     isSendingReceipt = false
                     receiptEmail = normalizedEmail
-                    receiptStatusMessage = "Receipt email saved."
+                    receiptStatusMessage = "Receipt email saved for \(normalizedEmail)."
                 }
             } catch {
                 await MainActor.run {
