@@ -56,7 +56,6 @@ export const key = {
   inventoryLedger: "inventory:ledger",
   inventoryLedgerBySlug: (slug: string) => `inventory:ledger:${slug}`,
   adminAudit: "admin:audit",
-  adminSettings: "admin:settings",
   archived: (slug: string) => `archived:${slug}`,
   published: (slug: string) => `published:${slug}`,
   siteVisual: (placement: string) => `site-visual:${placement}`

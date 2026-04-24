@@ -5,8 +5,6 @@ export type AdminAuditEntity = "order" | "product" | "settings" | "export" | "vi
 export type AdminAuditAction =
   | "admin_login"
   | "admin_logout"
-  | "settings_saved"
-  | "export_created"
   | "product_saved"
   | "product_deleted"
   | "stock_bulk_updated"

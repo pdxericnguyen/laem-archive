@@ -1,6 +1,5 @@
 import Stripe from "stripe";
 
-import { getAdminSettings } from "@/lib/admin-settings";
 import {
   cleanupExpiredInventoryReservations,
   getAvailableStock,
@@ -81,6 +80,29 @@ function asPositiveInt(value: string | undefined, fallback: number) {
     return fallback;
   }
   return Math.max(1, Math.floor(parsed));
+}
+
+function getShippingAddressAllowedCountries() {
+  const configured = (process.env.STRIPE_SHIPPING_ALLOWED_COUNTRIES || "US")
+    .split(",")
+    .map((value) => value.trim().toUpperCase())
+    .filter(Boolean);
+
+  if (configured.length === 0) {
+    return ["US" as ShippingAllowedCountry];
+  }
+
+  return [...new Set(configured)] as ShippingAllowedCountry[];
+}
+
+function getStripeShippingOptions() {
+  const shippingRateId = process.env.STRIPE_SHIPPING_RATE_ID?.trim();
+  return shippingRateId ? [{ shipping_rate: shippingRateId }] : undefined;
+}
+
+function isStripeAutomaticTaxEnabled() {
+  const value = process.env.STRIPE_AUTOMATIC_TAX_ENABLED;
+  return value === "1" || value?.toLowerCase() === "true";
 }
 
 function normalizeItem(rawSlug: unknown, rawQuantity: unknown): CheckoutItem | null {
@@ -352,14 +374,6 @@ export async function POST(request: Request) {
       : new Response(errorMessage, { status: 400, headers: rateLimitHeaders });
   }
   const cartMetadata = metadataResult.cartMetadata;
-  const adminSettings = await getAdminSettings();
-  const shippingAllowedCountries =
-    adminSettings.checkout.shippingAllowedCountries.length > 0
-      ? (adminSettings.checkout.shippingAllowedCountries as ShippingAllowedCountry[])
-      : (["US"] as ShippingAllowedCountry[]);
-  const shippingOptions = adminSettings.checkout.shippingRateId
-    ? [{ shipping_rate: adminSettings.checkout.shippingRateId }]
-    : undefined;
 
   let session: Stripe.Checkout.Session;
 
@@ -372,12 +386,12 @@ export async function POST(request: Request) {
         expires_at: expiresAt,
         billing_address_collection: "required",
         shipping_address_collection: {
-          allowed_countries: shippingAllowedCountries
+          allowed_countries: getShippingAddressAllowedCountries()
         },
         automatic_tax: {
-          enabled: adminSettings.checkout.automaticTaxEnabled
+          enabled: isStripeAutomaticTaxEnabled()
         },
-        shipping_options: shippingOptions,
+        shipping_options: getStripeShippingOptions(),
         line_items: lineItems,
         metadata: {
           cart: cartMetadata,

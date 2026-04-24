@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-import { getAdminSettings } from "@/lib/admin-settings";
 import { listOrdersPage } from "@/lib/orders";
 import type { OrderQueueFilter, OrderStatusFilter, StripeObjectType } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
@@ -69,7 +68,6 @@ export async function GET(req: Request) {
     fromUnix,
     toUnix
   });
-  const settings = await getAdminSettings();
 
   const rows = result.rows;
   const responseRows = rows.map((row) => ({
@@ -87,9 +85,6 @@ export async function GET(req: Request) {
       limit: result.limit,
       total: result.total,
       totalPages: result.totalPages
-    },
-    settings: {
-      refundRestockDefault: settings.checkout.refundRestockDefault
     }
   });
 }

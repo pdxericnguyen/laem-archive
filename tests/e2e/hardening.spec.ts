@@ -1,6 +1,5 @@
 import { expect, test } from "@playwright/test";
 
-import { normalizeCountryCodes, validateAdminSettingsInput } from "../../lib/admin-settings";
 import { buildEasyPostFulfillmentIdempotencyKey } from "../../lib/easypost";
 import { getInventoryScriptStatus } from "../../lib/inventory";
 import { suggestProductSlug, validateProductSlug } from "../../lib/product-slug";
@@ -26,26 +25,4 @@ test("product slugs are URL-safe and predictable", () => {
   expect(validateProductSlug("Silver Earring 01").ok).toBe(false);
   expect(validateProductSlug("silver--earring").ok).toBe(false);
   expect(suggestProductSlug("Silver Earring / 01")).toBe("silver-earring-01");
-});
-
-test("admin checkout settings normalize shipping and refund defaults", () => {
-  expect(normalizeCountryCodes("us, ca jp")).toEqual(["US", "CA", "JP"]);
-  expect(
-    validateAdminSettingsInput({
-      shippingAllowedCountries: "us, ca",
-      automaticTaxEnabled: true,
-      shippingRateId: "shr_123",
-      refundRestockDefault: false
-    })
-  ).toMatchObject({
-    ok: true,
-    settings: {
-      checkout: {
-        shippingAllowedCountries: ["US", "CA"],
-        automaticTaxEnabled: true,
-        shippingRateId: "shr_123",
-        refundRestockDefault: false
-      }
-    }
-  });
 });

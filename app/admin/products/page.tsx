@@ -837,17 +837,9 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                 </div>
               </summary>
               <div className="border-t border-neutral-200 p-6 space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <p className="text-xs text-neutral-500">
-                  Full editor for <span className="font-semibold text-neutral-700">{product.title}</span>.
-                </p>
-                <a
-                  href={`/admin/reconciliation?slug=${encodeURIComponent(product.slug)}`}
-                  className="inline-flex text-xs font-semibold text-neutral-700 underline"
-                >
-                  View inventory audit
-                </a>
-              </div>
+              <p className="text-xs text-neutral-500">
+                Full editor for <span className="font-semibold text-neutral-700">{product.title}</span>.
+              </p>
               <form action="/api/admin/products/save" method="POST" className="grid gap-3 text-sm">
                 <input type="hidden" name="originalSlug" value={product.slug} />
                 <input type="hidden" name="returnStatusFilter" value={activeFilter} />

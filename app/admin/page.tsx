@@ -96,27 +96,9 @@ export default async function AdminHome() {
         </a>
         <a
           className="border border-neutral-300 px-4 h-11 inline-flex items-center no-underline hover:bg-neutral-50"
-          href="/admin/reconciliation"
-        >
-          Inventory Audit
-        </a>
-        <a
-          className="border border-neutral-300 px-4 h-11 inline-flex items-center no-underline hover:bg-neutral-50"
           href="/admin/visuals"
         >
           Site Visuals
-        </a>
-        <a
-          className="border border-neutral-300 px-4 h-11 inline-flex items-center no-underline hover:bg-neutral-50"
-          href="/admin/settings"
-        >
-          System Settings
-        </a>
-        <a
-          className="border border-neutral-300 px-4 h-11 inline-flex items-center no-underline hover:bg-neutral-50"
-          href="/admin/audit"
-        >
-          Audit Log
         </a>
       </div>
     </main>
