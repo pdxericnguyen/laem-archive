@@ -238,7 +238,20 @@ async function maybeAutoPrintPackingSlip(
 async function finalizeSuccessfulOrder(params: FinalizeOrderParams) {
   const lock = await acquireOrderProcessingLock(params.id);
   if (lock.ok === false) {
-    return lock.reason === "already_processed" ? ("duplicate" as const) : ("busy" as const);
+    if (lock.reason === "already_processed") {
+      try {
+        await appendOrderToIndex(params.id);
+        return "duplicate" as const;
+      } catch (error) {
+        console.error("Unable to repair order index for duplicate webhook", {
+          orderId: params.id,
+          error
+        });
+        return "busy" as const;
+      }
+    }
+
+    return "busy" as const;
   }
 
   try {

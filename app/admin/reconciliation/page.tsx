@@ -20,9 +20,11 @@ import {
 } from "@/lib/reconciliation";
 import type { Product } from "@/lib/store";
 
-export const metadata = { title: "Reconciliation | Admin" };
+export const metadata = { title: "Inventory Audit | Admin" };
 export const dynamic = "force-dynamic";
 
+// Route kept as /admin/reconciliation so existing links and tests continue to work;
+// the admin-facing name is Inventory Audit.
 type AdminReconciliationPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
@@ -111,7 +113,7 @@ export default async function AdminReconciliationPage({ searchParams }: AdminRec
     return (
       <main className="mx-auto max-w-6xl px-4 py-10 space-y-4">
         <AdminSystemHealthBanner />
-        <h1 className="text-lg font-semibold tracking-tight">Reconciliation</h1>
+        <h1 className="text-lg font-semibold tracking-tight">Inventory Audit</h1>
         <AdminCommandPalette />
         <p className="text-sm text-neutral-600">Redis is not configured.</p>
       </main>
@@ -161,7 +163,7 @@ export default async function AdminReconciliationPage({ searchParams }: AdminRec
       <AdminSystemHealthBanner />
       <header className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-lg font-semibold tracking-tight">Reconciliation</h1>
+          <h1 className="text-lg font-semibold tracking-tight">Inventory Audit</h1>
           <a
             href="/admin"
             className="inline-flex h-10 items-center border border-neutral-300 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-700 no-underline hover:bg-neutral-50"
@@ -170,14 +172,14 @@ export default async function AdminReconciliationPage({ searchParams }: AdminRec
           </a>
         </div>
         <p className="text-sm text-neutral-600">
-          Compare recent Stripe payments, LAEM orders, inventory holds, and stock movement in one place.
+          Review stock movement, checkout holds, conflicts, and rare payment/order gaps in one place.
         </p>
       </header>
       <AdminCommandPalette />
 
       <section className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
         <div className="border border-neutral-200 p-3">
-          <p className="text-[11px] uppercase tracking-[0.12em] text-neutral-500">Missing Orders</p>
+          <p className="text-[11px] uppercase tracking-[0.12em] text-neutral-500">Stripe Gaps</p>
           <p className="mt-1 text-xl font-semibold text-neutral-900">{summary.missingOrderPayments.length}</p>
         </div>
         <div className="border border-neutral-200 p-3">
@@ -189,7 +191,7 @@ export default async function AdminReconciliationPage({ searchParams }: AdminRec
           <p className="mt-1 text-xl font-semibold text-neutral-900">{summary.activeHeldUnits}</p>
         </div>
         <div className="border border-neutral-200 p-3">
-          <p className="text-[11px] uppercase tracking-[0.12em] text-neutral-500">Missing Inv IDs</p>
+          <p className="text-[11px] uppercase tracking-[0.12em] text-neutral-500">Legacy IDs</p>
           <p className="mt-1 text-xl font-semibold text-neutral-900">{summary.missingInventoryIdentities.length}</p>
         </div>
       </section>
@@ -204,7 +206,7 @@ export default async function AdminReconciliationPage({ searchParams }: AdminRec
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-neutral-800">
-              Issues
+              Audit Alerts
             </h2>
             <p className="text-sm text-neutral-600">
               Checked {summary.ordersChecked} LAEM orders and {summary.stripePaymentsChecked} recent Stripe payments.
@@ -220,7 +222,7 @@ export default async function AdminReconciliationPage({ searchParams }: AdminRec
         <div className="grid gap-2">
           {summary.issues.length === 0 ? (
             <div className="border border-emerald-300 bg-emerald-50 px-3 py-3 text-sm text-emerald-900">
-              No reconciliation issues found in the checked window.
+              No audit alerts found in the checked window.
             </div>
           ) : (
             summary.issues.map((issue) => (
@@ -298,7 +300,7 @@ export default async function AdminReconciliationPage({ searchParams }: AdminRec
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-neutral-800">
-              Inventory Timeline
+              Stock Movement Timeline
             </h2>
             <p className="text-sm text-neutral-600">
               {selectedSlug ? (

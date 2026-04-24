@@ -1,15 +1,23 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import { recordAdminAuditEvent } from "@/lib/admin-audit";
-import { readOrder, writeOrder } from "@/lib/orders";
+import { readOrder, writeOrder, type OrderNote } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 
-type ResolvePayload = {
+export const runtime = "nodejs";
+
+type NotesPayload = {
   orderId: string;
   note: string;
+  kind: "internal" | "follow_up";
 };
 
-async function getPayload(request: Request): Promise<ResolvePayload | null> {
+function normalizeKind(value: unknown): NotesPayload["kind"] {
+  return value === "follow_up" ? "follow_up" : "internal";
+}
+
+async function getPayload(request: Request): Promise<NotesPayload | null> {
   const contentType = request.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
@@ -17,20 +25,28 @@ async function getPayload(request: Request): Promise<ResolvePayload | null> {
       return null;
     }
     const orderId = typeof body.orderId === "string" ? body.orderId.trim() : "";
-    const note = typeof body.note === "string" ? body.note.trim() : "";
-    if (!orderId) {
+    const note = typeof body.note === "string" ? body.note.trim().slice(0, 1200) : "";
+    if (!orderId || !note) {
       return null;
     }
-    return { orderId, note };
+    return {
+      orderId,
+      note,
+      kind: normalizeKind(body.kind)
+    };
   }
 
   const formData = await request.formData();
   const orderId = String(formData.get("orderId") || "").trim();
-  const note = String(formData.get("note") || "").trim();
-  if (!orderId) {
+  const note = String(formData.get("note") || "").trim().slice(0, 1200);
+  if (!orderId || !note) {
     return null;
   }
-  return { orderId, note };
+  return {
+    orderId,
+    note,
+    kind: normalizeKind(formData.get("kind"))
+  };
 }
 
 export async function POST(request: Request) {
@@ -42,7 +58,7 @@ export async function POST(request: Request) {
 
   const payload = await getPayload(request);
   if (!payload) {
-    return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "Order and note are required." }, { status: 400 });
   }
 
   const order = await readOrder(payload.orderId);
@@ -50,36 +66,32 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, error: "Order not found" }, { status: 404 });
   }
 
-  if (order.status === "conflict_resolved") {
-    return NextResponse.json({ ok: true, already: true });
-  }
-
-  if (order.status !== "stock_conflict") {
-    return NextResponse.json(
-      { ok: false, error: "Only stock conflict orders can be resolved." },
-      { status: 409 }
-    );
-  }
+  const note: OrderNote = {
+    id: randomUUID(),
+    note: payload.note,
+    kind: payload.kind,
+    createdAt: Math.floor(Date.now() / 1000)
+  };
 
   const updated = {
     ...order,
-    status: "conflict_resolved" as const,
-    conflictResolution: {
-      note: payload.note || "Resolved in admin",
-      resolvedAt: Math.floor(Date.now() / 1000)
-    }
+    notes: [note, ...(order.notes || [])].slice(0, 50)
   };
 
   await writeOrder(updated);
   await recordAdminAuditEvent({
-    action: "order_conflict_resolved",
+    action: "order_note_added",
     entity: "order",
     entityId: order.id,
-    summary: "Stock conflict marked resolved",
+    summary: "Order note added",
     details: {
-      note: updated.conflictResolution.note
+      kind: note.kind,
+      note: note.note
     }
   });
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    note
+  });
 }

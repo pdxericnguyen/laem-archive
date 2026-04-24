@@ -17,6 +17,7 @@ export type EasyPostShipmentRequest = {
   reference: string;
   carrier?: string;
   service?: string;
+  idempotencyKey?: string;
 };
 
 export type EasyPostShipmentResult =
@@ -135,21 +136,46 @@ function pickRate(rates: EasyPostRate[], requestedCarrier: string, requestedServ
   return [...candidates].sort((a, b) => a.rate - b.rate)[0];
 }
 
-async function easypostRequest(path: string, payload: Record<string, unknown>) {
+function normalizeIdempotencyKey(value: unknown) {
+  const raw = asString(value);
+  if (!raw) {
+    return "";
+  }
+  return raw.replace(/[^a-zA-Z0-9_.:-]/g, "_").slice(0, 180);
+}
+
+export function buildEasyPostFulfillmentIdempotencyKey(reference: string) {
+  const normalizedReference = normalizeIdempotencyKey(reference);
+  return normalizedReference ? `laem-fulfillment:${normalizedReference}` : "";
+}
+
+async function easypostRequest(
+  path: string,
+  payload: Record<string, unknown>,
+  options?: {
+    idempotencyKey?: string;
+  }
+) {
   const apiKey = getEasyPostApiKey();
   if (!apiKey) {
     return { ok: false as const, error: "Missing EASYPOST_API_KEY." };
   }
 
   const authorization = `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`;
+  const idempotencyKey = normalizeIdempotencyKey(options?.idempotencyKey);
+  const headers: Record<string, string> = {
+    authorization,
+    "content-type": "application/json"
+  };
+  if (idempotencyKey) {
+    headers["Idempotency-Key"] = idempotencyKey;
+  }
+
   let response: Response;
   try {
     response = await fetch(`${EASYPOST_API_BASE}${path}`, {
       method: "POST",
-      headers: {
-        authorization,
-        "content-type": "application/json"
-      },
+      headers,
       body: JSON.stringify(payload)
     });
   } catch (error) {
@@ -200,14 +226,24 @@ export async function createEasyPostShipmentAndBuyLabel(
     };
   }
 
-  const createResult = await easypostRequest("/shipments", {
-    shipment: {
-      reference: request.reference,
-      from_address: fromAddress,
-      to_address: request.toAddress,
-      parcel: getDefaultParcelFromEnv()
+  const idempotencyKey =
+    normalizeIdempotencyKey(request.idempotencyKey) ||
+    buildEasyPostFulfillmentIdempotencyKey(request.reference);
+
+  const createResult = await easypostRequest(
+    "/shipments",
+    {
+      shipment: {
+        reference: request.reference,
+        from_address: fromAddress,
+        to_address: request.toAddress,
+        parcel: getDefaultParcelFromEnv()
+      }
+    },
+    {
+      idempotencyKey: idempotencyKey ? `${idempotencyKey}:shipment` : undefined
     }
-  });
+  );
 
   if (!createResult.ok) {
     return {
@@ -233,11 +269,17 @@ export async function createEasyPostShipmentAndBuyLabel(
     return { ok: false, error: "No EasyPost shipping rates available for this order." };
   }
 
-  const buyResult = await easypostRequest(`/shipments/${shipmentId}/buy`, {
-    rate: {
-      id: selectedRate.id
+  const buyResult = await easypostRequest(
+    `/shipments/${shipmentId}/buy`,
+    {
+      rate: {
+        id: selectedRate.id
+      }
+    },
+    {
+      idempotencyKey: idempotencyKey ? `${idempotencyKey}:buy:${shipmentId}:${selectedRate.id}` : undefined
     }
-  });
+  );
   if (!buyResult.ok) {
     return {
       ok: false,

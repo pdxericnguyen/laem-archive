@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { recordAdminAuditEvent } from "@/lib/admin-audit";
 import { buildPackingSlipPdfBase64 } from "@/lib/packing-slip-pdf";
 import { createPrintNodeJob, getPrintNodePrinterId } from "@/lib/printnode";
 import { readOrder, writeOrder } from "@/lib/orders";
@@ -133,6 +134,17 @@ export async function POST(request: Request) {
       );
     }
 
+    await recordAdminAuditEvent({
+      action: "order_reprint_requested",
+      entity: "order",
+      entityId: order.id,
+      summary: "Shipping label reprint requested",
+      details: {
+        kind: payload.kind,
+        printJobId: updated.printing?.shippingLabel?.externalId || null
+      }
+    });
+
     return NextResponse.json({
       ok: true,
       kind: printStatusKey,
@@ -197,6 +209,17 @@ export async function POST(request: Request) {
       { status: 502 }
     );
   }
+
+  await recordAdminAuditEvent({
+    action: "order_reprint_requested",
+    entity: "order",
+    entityId: order.id,
+    summary: "Packing slip reprint requested",
+    details: {
+      kind: payload.kind,
+      printJobId: updated.printing?.packingSlip?.externalId || null
+    }
+  });
 
   return NextResponse.json({
     ok: true,

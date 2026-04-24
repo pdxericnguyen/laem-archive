@@ -150,11 +150,11 @@ export default function ImageUploadField({
   defaultValue = "",
   ownerId,
   ownerType,
-  label = "Images (one per line)",
-  helperText = "Drop or choose images. Files upload when you save.",
-  placeholder = "One image URL per line",
+  label = "Images",
+  helperText = "Drag photos to reorder. Save product to apply changes.",
+  placeholder = "Paste image URLs, one per line",
   previewAlt = "Image preview",
-  emptyLabel = "Upload image",
+  emptyLabel = "Add image",
   uploadFolder = "products",
   allowMultiple = true,
   aspectClassName = "aspect-[4/5]"
@@ -162,8 +162,9 @@ export default function ImageUploadField({
   const [imageItems, setImageItems] = useState<ImageItem[]>(() => createUrlItems(defaultValue, allowMultiple));
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [uploading, setUploading] = useState(false);
-  const [deletingUrl, setDeletingUrl] = useState<string | null>(null);
   const [isDropActive, setIsDropActive] = useState(false);
+  const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -174,6 +175,7 @@ export default function ImageUploadField({
   const skipNextSubmitInterceptRef = useRef(false);
   const pendingIdRef = useRef(0);
   const dropDepthRef = useRef(0);
+  const reorderDragIndexRef = useRef<number | null>(null);
 
   const imageUrls = useMemo(
     () => imageItems.filter((item) => item.kind === "url").map((item) => item.url),
@@ -281,7 +283,7 @@ export default function ImageUploadField({
       }));
     });
     setSelectedIndex((current) => (allowMultiple ? imageItems.length || current : 0));
-    setMessage(`${stagedItems.length} image${stagedItems.length === 1 ? "" : "s"} ready. Save to upload.`);
+    setMessage(`${stagedItems.length} image${stagedItems.length === 1 ? "" : "s"} added. Save to finish.`);
   }
 
   async function uploadPendingItems(items: ImageItem[]) {
@@ -334,7 +336,7 @@ export default function ImageUploadField({
 
     setUploading(true);
     setError(null);
-    setMessage("Uploading images before saving...");
+    setMessage("Preparing images...");
 
     const nextItems = await uploadPendingItems(currentItems);
     const nextValue = serializeImageUrls(
@@ -387,7 +389,7 @@ export default function ImageUploadField({
       detail.handled = true;
       flushPendingImages()
         .then((result) => {
-          setMessage(result.uploadedCount > 0 ? "Images uploaded." : message);
+          setMessage(result.uploadedCount > 0 ? "Images ready." : message);
           setUploading(false);
           detail.resolve?.(result);
         })
@@ -433,7 +435,7 @@ export default function ImageUploadField({
 
       try {
         await flushPendingImages();
-        setMessage("Images uploaded. Saving...");
+        setMessage("Saving product...");
         skipNextSubmitInterceptRef.current = true;
         window.setTimeout(() => {
           const submitter = event.submitter;
@@ -461,7 +463,7 @@ export default function ImageUploadField({
   }, [allowMultiple, uploadFolder]);
 
   function openPicker() {
-    if (uploading || deletingUrl) {
+    if (uploading) {
       return;
     }
     fileInputRef.current?.click();
@@ -500,7 +502,7 @@ export default function ImageUploadField({
       URL.revokeObjectURL(item.previewUrl);
       if (!allowMultiple && item.previousItems && item.previousItems.length > 0) {
         updateImageItems(item.previousItems, 0);
-        setMessage("Pending image discarded. Previous image restored.");
+        setMessage("New image removed. Previous image restored.");
         setError(null);
         return;
       }
@@ -509,73 +511,20 @@ export default function ImageUploadField({
     updateImageItems(nextItems, index >= nextItems.length ? nextItems.length - 1 : index);
     setMessage(
       item?.kind === "file"
-        ? "Pending image discarded."
+        ? "New image removed."
         : "Image removed from this listing. Save to publish the change."
     );
     setError(null);
   }
 
-  async function deleteImageFile(index: number) {
-    const item = imageItems[index];
-    if (!item || deletingUrl) {
-      return;
-    }
-    if (item.kind === "file") {
-      removeImage(index);
-      return;
-    }
-
-    const url = item.url;
-
-    const confirmed = window.confirm(
-      "Delete this uploaded file permanently? This will only succeed if it is not used by another product or site visual."
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setDeletingUrl(url);
-    setError(null);
-    setMessage(null);
-
-    try {
-      const response = await fetch("/api/admin/blob/delete", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json"
-        },
-        body: JSON.stringify({
-          url,
-          excludeProductSlug: ownerType === "product" ? ownerId : undefined,
-          excludeSiteVisualPlacement: ownerType === "site_visual" ? ownerId : undefined
-        })
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok || !payload?.ok) {
-        const references = Array.isArray(payload?.references)
-          ? payload.references
-              .map((reference: { label?: unknown; id?: unknown }) =>
-                typeof reference.label === "string" ? reference.label : String(reference.id || "")
-              )
-              .filter(Boolean)
-          : [];
-        const suffix = references.length > 0 ? ` Still used by: ${references.join(", ")}.` : "";
-        throw new Error(`${payload?.error || "Unable to delete image."}${suffix}`);
-      }
-
-      removeImage(index);
-      setMessage("Image file deleted and removed from this listing. Save to publish the change.");
-    } catch (deleteError) {
-      const errorMessage = deleteError instanceof Error ? deleteError.message : "Unable to delete image.";
-      setError(errorMessage);
-    } finally {
-      setDeletingUrl(null);
-    }
-  }
-
-  function moveImage(index: number, direction: -1 | 1) {
-    const targetIndex = index + direction;
-    if (index < 0 || targetIndex < 0 || index >= imageItems.length || targetIndex >= imageItems.length) {
+  function reorderImage(index: number, targetIndex: number) {
+    if (
+      index < 0 ||
+      targetIndex < 0 ||
+      index >= imageItems.length ||
+      targetIndex >= imageItems.length ||
+      index === targetIndex
+    ) {
       return;
     }
     const nextItems = [...imageItems];
@@ -584,6 +533,10 @@ export default function ImageUploadField({
     updateImageItems(nextItems, targetIndex);
     setMessage("Image order updated. Save to publish the change.");
     setError(null);
+  }
+
+  function moveImage(index: number, direction: -1 | 1) {
+    reorderImage(index, index + direction);
   }
 
   function setAsPrimary(index: number) {
@@ -596,6 +549,47 @@ export default function ImageUploadField({
     updateImageItems(nextItems, 0);
     setMessage("Primary image updated. Save to publish the change.");
     setError(null);
+  }
+
+  function handleThumbnailDragStart(event: DragEvent<HTMLDivElement>, index: number) {
+    if (!allowMultiple || imageItems.length <= 1 || uploading) {
+      return;
+    }
+    event.stopPropagation();
+    reorderDragIndexRef.current = index;
+    setDraggingIndex(index);
+    setDragOverIndex(index);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", String(index));
+  }
+
+  function handleThumbnailDragOver(event: DragEvent<HTMLDivElement>, index: number) {
+    if (reorderDragIndexRef.current === null) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setDragOverIndex(index);
+  }
+
+  function handleThumbnailDrop(event: DragEvent<HTMLDivElement>, index: number) {
+    const sourceIndex = reorderDragIndexRef.current;
+    if (sourceIndex === null) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    reorderDragIndexRef.current = null;
+    setDraggingIndex(null);
+    setDragOverIndex(null);
+    reorderImage(sourceIndex, index);
+  }
+
+  function handleThumbnailDragEnd() {
+    reorderDragIndexRef.current = null;
+    setDraggingIndex(null);
+    setDragOverIndex(null);
   }
 
   function onFileInputChange(event: ChangeEvent<HTMLInputElement>) {
@@ -678,7 +672,7 @@ export default function ImageUploadField({
           <button
             type="button"
             onClick={openPicker}
-            disabled={uploading || Boolean(deletingUrl)}
+            disabled={uploading}
             className={`group relative block w-full overflow-hidden border bg-neutral-50 hover:bg-neutral-100 ${
               isDropActive ? "border-neutral-800 ring-1 ring-neutral-300" : "border-neutral-300"
             } ${aspectClassName}`}
@@ -691,7 +685,7 @@ export default function ImageUploadField({
               />
             ) : (
               <div className="flex h-full w-full items-center justify-center px-4 text-center text-xs text-neutral-500">
-                {uploading ? "Uploading..." : deletingUrl ? "Deleting..." : emptyLabel}
+                {uploading ? "Saving..." : emptyLabel}
               </div>
             )}
             {isDropActive ? (
@@ -699,58 +693,52 @@ export default function ImageUploadField({
                 Drop image to upload
               </div>
             ) : null}
-            {selectedImageItem?.kind === "file" ? (
-              <div className="pointer-events-none absolute left-3 top-3 bg-white/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-neutral-700">
-                Pending Save
-              </div>
-            ) : null}
             <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-white/90 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-700">
-              {uploading ? "Uploading..." : deletingUrl ? "Deleting..." : selectedImageUrl ? "Replace / Add Image" : "Add First Image"}
+              {uploading ? "Saving..." : selectedImageUrl ? "Add / Replace Image" : "Add First Image"}
             </div>
           </button>
 
           <div className="flex items-center gap-2 overflow-x-auto">
             {imageItems.map((item, index) => {
               const previewUrl = getItemPreviewUrl(item);
-              const isPending = item.kind === "file";
               const itemLabel = getItemLabel(item);
               return (
                 <div
                   key={item.id}
-                  className="grid shrink-0 gap-1"
+                  draggable={allowMultiple && imageItems.length > 1 && !uploading}
+                  onDragStart={(event) => handleThumbnailDragStart(event, index)}
+                  onDragOver={(event) => handleThumbnailDragOver(event, index)}
+                  onDrop={(event) => handleThumbnailDrop(event, index)}
+                  onDragEnd={handleThumbnailDragEnd}
+                  className={`grid shrink-0 gap-1 ${
+                    draggingIndex === index ? "opacity-50" : ""
+                  }`}
                 >
                   <button
                     type="button"
                     className={`relative h-16 w-14 overflow-hidden border ${
-                      selectedIndex === index ? "border-neutral-700" : "border-neutral-300"
+                      selectedIndex === index
+                        ? "border-neutral-700"
+                        : dragOverIndex === index
+                          ? "border-neutral-700 ring-1 ring-neutral-300"
+                          : "border-neutral-300"
                     }`}
                     onClick={() => setSelectedIndex(index)}
                     title={`Image ${index + 1}: ${itemLabel}`}
                   >
                     <img src={previewUrl} alt={`Image ${index + 1}`} className="h-full w-full object-cover" />
                     <span className="absolute left-1 top-1 bg-white/90 px-1 text-[9px] font-semibold text-neutral-700">
-                      {isPending ? "Pending" : index + 1}
+                      {index === 0 ? "First" : index + 1}
                     </span>
                   </button>
                   <button
                     type="button"
                     className="h-6 border border-neutral-300 text-[10px] font-semibold text-neutral-700 hover:bg-neutral-50"
                     onClick={() => removeImage(index)}
-                    title={`${isPending ? "Discard pending" : "Remove"} image ${index + 1}`}
+                    title={`Remove image ${index + 1} from this listing`}
                   >
-                    {isPending ? "Discard" : "Remove"}
+                    Remove
                   </button>
-                  {!isPending ? (
-                    <button
-                      type="button"
-                      className="h-6 border border-red-300 text-[10px] font-semibold text-red-700 hover:bg-red-50 disabled:opacity-40"
-                      onClick={() => deleteImageFile(index)}
-                      disabled={Boolean(deletingUrl)}
-                      title={`Delete image ${index + 1} file permanently`}
-                    >
-                      Delete File
-                    </button>
-                  ) : null}
                 </div>
               );
             })}
@@ -795,32 +783,13 @@ export default function ImageUploadField({
                 className="h-8 border border-red-300 px-2 text-[11px] font-semibold text-red-700 hover:bg-red-50"
                 onClick={() => removeImage(selectedIndex)}
               >
-                {selectedImageItem?.kind === "file" ? "Discard Pending" : "Remove Selected"}
+                Remove Selected
               </button>
-              {selectedImageItem?.kind === "url" ? (
-                <button
-                  type="button"
-                  className="h-8 border border-red-700 px-2 text-[11px] font-semibold text-red-800 hover:bg-red-50 disabled:opacity-40"
-                  onClick={() => deleteImageFile(selectedIndex)}
-                  disabled={Boolean(deletingUrl)}
-                >
-                  Delete File
-                </button>
-              ) : null}
             </div>
           ) : null}
         </div>
 
         <div className="space-y-2">
-          <textarea
-            ref={textareaRef}
-            name={name}
-            rows={allowMultiple ? 6 : 3}
-            className="border border-neutral-300 p-3"
-            value={normalizedValue}
-            onChange={(event) => handleUrlTextChange(event.target.value)}
-            placeholder={placeholder}
-          />
           <input
             ref={pendingInputRef}
             type="hidden"
@@ -828,6 +797,23 @@ export default function ImageUploadField({
             value={pendingSignature}
             readOnly
           />
+          <details className="border border-neutral-200 p-3">
+            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-600">
+              Paste Image URLs
+            </summary>
+            <textarea
+              ref={textareaRef}
+              name={name}
+              rows={allowMultiple ? 6 : 3}
+              className="mt-3 w-full border border-neutral-300 p-3 text-sm"
+              value={normalizedValue}
+              onChange={(event) => handleUrlTextChange(event.target.value)}
+              placeholder={placeholder}
+            />
+            <p className="mt-2 text-[11px] text-neutral-500">
+              Optional for images already hosted somewhere else.
+            </p>
+          </details>
           <p className="text-[11px] text-neutral-500">
             {helperText}
           </p>
@@ -846,14 +832,14 @@ export default function ImageUploadField({
         <button
           type="button"
           className="h-9 px-3 border border-neutral-300 text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
-          disabled={uploading || Boolean(deletingUrl)}
+          disabled={uploading}
           onClick={openPicker}
         >
-          {uploading ? "Uploading..." : deletingUrl ? "Deleting..." : "Upload Image"}
+          {uploading ? "Saving..." : "Add Images"}
         </button>
         <span className="text-xs text-neutral-500">
           {imageCount} image{imageCount === 1 ? "" : "s"}
-          {pendingCount > 0 ? `, ${pendingCount} pending upload` : ""}
+          {pendingCount > 0 ? `, ${pendingCount} new` : ""}
         </span>
       </div>
 

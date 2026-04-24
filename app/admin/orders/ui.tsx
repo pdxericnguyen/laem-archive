@@ -2,7 +2,14 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type OrderStatus = "paid" | "shipped" | "stock_conflict" | "conflict_resolved" | string;
+type OrderStatus =
+  | "paid"
+  | "shipped"
+  | "stock_conflict"
+  | "conflict_resolved"
+  | "refunded"
+  | "canceled"
+  | string;
 type QueueFilter = "all" | "paid_unfulfilled" | "address_missing" | "print_failed" | "conflicts";
 
 type OrderRow = {
@@ -54,6 +61,21 @@ type OrderRow = {
     service?: string | null;
     purchasedAt?: number | null;
   };
+  refund?: {
+    refundId?: string | null;
+    amount?: number | null;
+    currency?: string | null;
+    reason?: string | null;
+    restocked?: boolean;
+    refundedAt?: number | null;
+    note?: string | null;
+  };
+  notes?: Array<{
+    id: string;
+    note: string;
+    createdAt: number;
+    kind?: "internal" | "follow_up" | string;
+  }>;
   conflictResolution?: {
     note?: string;
     resolvedAt?: number;
@@ -63,7 +85,7 @@ type OrderRow = {
 };
 
 type Filters = {
-  status: "all" | "paid" | "shipped" | "stock_conflict" | "conflict_resolved";
+  status: "all" | "paid" | "shipped" | "stock_conflict" | "conflict_resolved" | "refunded" | "canceled";
   queue: QueueFilter;
   from: string;
   to: string;
@@ -124,7 +146,9 @@ function parseFiltersFromUrl() {
         status === "paid" ||
         status === "shipped" ||
         status === "stock_conflict" ||
-        status === "conflict_resolved"
+        status === "conflict_resolved" ||
+        status === "refunded" ||
+        status === "canceled"
           ? status
           : "all",
       queue:
@@ -175,6 +199,12 @@ function toStatusLabel(status?: OrderStatus) {
   }
   if (status === "conflict_resolved") {
     return "Conflict Resolved";
+  }
+  if (status === "refunded") {
+    return "Refunded";
+  }
+  if (status === "canceled") {
+    return "Canceled";
   }
   if (status === "stock_conflict") {
     return "Stock Conflict";
@@ -277,6 +307,15 @@ function buildTimeline(row: OrderRow): TimelineEvent[] {
     });
   }
 
+  if (row.refund?.refundedAt) {
+    timeline.push({
+      id: "refunded",
+      label: "Refunded / canceled",
+      at: row.refund.refundedAt,
+      detail: row.refund.note || row.refund.reason || undefined
+    });
+  }
+
   if (row.piiRedactedAt) {
     timeline.push({
       id: "pii-redacted",
@@ -296,6 +335,7 @@ export default function OrdersClient() {
   const [notice, setNotice] = useState<InlineNotice | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkWorking, setBulkWorking] = useState(false);
+  const [refundRestockDefault, setRefundRestockDefault] = useState(true);
 
   const [draftFilters, setDraftFilters] = useState<Filters>(initial.filters);
   const [filters, setFilters] = useState<Filters>(initial.filters);
@@ -346,6 +386,9 @@ export default function OrdersClient() {
             ? Math.max(1, nextPagination.totalPages)
             : 1
       });
+      if (typeof data?.settings?.refundRestockDefault === "boolean") {
+        setRefundRestockDefault(data.settings.refundRestockDefault);
+      }
     } catch {
       setRows([]);
       setError("Unable to load orders.");
@@ -558,6 +601,8 @@ export default function OrdersClient() {
             <option value="shipped">Shipped</option>
             <option value="stock_conflict">Stock conflict</option>
             <option value="conflict_resolved">Conflict resolved</option>
+            <option value="refunded">Refunded</option>
+            <option value="canceled">Canceled</option>
           </select>
         </label>
         <label className="grid gap-1">
@@ -682,6 +727,7 @@ export default function OrdersClient() {
               key={row.id}
               row={row}
               selected={selectedIds.includes(row.id)}
+              refundRestockDefault={refundRestockDefault}
               onSelectedChange={(checked) => toggleSelect(row.id, checked)}
               onShipped={async (message) => {
                 setNotice({ kind: "success", text: message });
@@ -727,12 +773,14 @@ export default function OrdersClient() {
 function OrderCard({
   row,
   selected,
+  refundRestockDefault,
   onSelectedChange,
   onShipped,
   onResolved
 }: {
   row: OrderRow;
   selected: boolean;
+  refundRestockDefault: boolean;
   onSelectedChange: (checked: boolean) => void;
   onShipped: (message: string) => Promise<void>;
   onResolved: (message: string) => Promise<void>;
@@ -743,7 +791,20 @@ function OrderCard({
   const [resolving, setResolving] = useState(false);
   const [reprinting, setReprinting] = useState<"packingSlip" | "shippingLabel" | null>(null);
   const [redactingPii, setRedactingPii] = useState(false);
+  const [refunding, setRefunding] = useState(false);
+  const [addingNote, setAddingNote] = useState(false);
+  const [updatingAddress, setUpdatingAddress] = useState(false);
+  const [resendingEmail, setResendingEmail] = useState<"order_received" | "shipped" | null>(null);
   const [resolveNote, setResolveNote] = useState("Refund handled in Stripe");
+  const [newNote, setNewNote] = useState("");
+  const [newNoteKind, setNewNoteKind] = useState<"internal" | "follow_up">("internal");
+  const [refundNote, setRefundNote] = useState("");
+  const [refundReason, setRefundReason] = useState<"requested_by_customer" | "duplicate" | "fraudulent">(
+    "requested_by_customer"
+  );
+  const [refundRestock, setRefundRestock] = useState(
+    row.status !== "shipped" && row.status !== "stock_conflict" && refundRestockDefault
+  );
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const shipToAddress = formatAddress(row);
@@ -751,6 +812,17 @@ function OrderCard({
   const canAutoFulfill = row.channel !== "terminal";
   const missingShippingAddress = requiresShippingAddress && !shipToAddress;
   const timeline = buildTimeline(row);
+  const terminalOrderState =
+    row.status === "shipped" || row.status === "refunded" || row.status === "canceled";
+  const canRefund =
+    row.status === "paid" ||
+    row.status === "stock_conflict" ||
+    row.status === "conflict_resolved" ||
+    row.status === "shipped";
+
+  useEffect(() => {
+    setRefundRestock(row.status !== "shipped" && row.status !== "stock_conflict" && refundRestockDefault);
+  }, [refundRestockDefault, row.id, row.status]);
 
   async function copyText(value: string, label: string) {
     try {
@@ -959,6 +1031,157 @@ function OrderCard({
     }
   }
 
+  async function addOrderNote(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!newNote.trim()) {
+      setError("Add a note before saving.");
+      return;
+    }
+
+    setAddingNote(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch("/api/admin/orders/notes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          orderId: row.id,
+          note: newNote,
+          kind: newNoteKind
+        })
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok) {
+        setError(data?.error || "Unable to add note.");
+        return;
+      }
+      setNewNote("");
+      const msg = "Order note added.";
+      setSuccess(msg);
+      await onShipped(msg);
+    } catch {
+      setError("Unable to add note.");
+    } finally {
+      setAddingNote(false);
+    }
+  }
+
+  async function updateShippingAddress(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setUpdatingAddress(true);
+    setError(null);
+    setSuccess(null);
+
+    const formData = new FormData(event.currentTarget);
+    const payload = {
+      orderId: row.id,
+      name: String(formData.get("name") || ""),
+      phone: String(formData.get("phone") || ""),
+      line1: String(formData.get("line1") || ""),
+      line2: String(formData.get("line2") || ""),
+      city: String(formData.get("city") || ""),
+      state: String(formData.get("state") || ""),
+      postalCode: String(formData.get("postalCode") || ""),
+      country: String(formData.get("country") || "")
+    };
+
+    try {
+      const response = await fetch("/api/admin/orders/update-address", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok) {
+        setError(data?.error || "Unable to update address.");
+        return;
+      }
+      const msg = "Shipping address updated.";
+      setSuccess(msg);
+      await onShipped(msg);
+    } catch {
+      setError("Unable to update address.");
+    } finally {
+      setUpdatingAddress(false);
+    }
+  }
+
+  async function resendEmail(kind: "order_received" | "shipped") {
+    setResendingEmail(kind);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch("/api/admin/orders/resend-email", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          orderId: row.id,
+          kind
+        })
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok) {
+        setError(data?.error || "Unable to resend email.");
+        return;
+      }
+      const msg = kind === "shipped" ? "Shipping email resent." : "Order confirmation email resent.";
+      setSuccess(msg);
+      await onShipped(msg);
+    } catch {
+      setError("Unable to resend email.");
+    } finally {
+      setResendingEmail(null);
+    }
+  }
+
+  async function refundOrder(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const confirmed = window.confirm(
+      refundRestock
+        ? "Refund this order in Stripe and restock its items?"
+        : "Refund this order in Stripe without changing stock?"
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setRefunding(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const response = await fetch("/api/admin/orders/refund", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          orderId: row.id,
+          restock: refundRestock,
+          reason: refundReason,
+          note: refundNote
+        })
+      });
+      const data = await response.json().catch(() => null);
+      if (!response.ok || !data?.ok) {
+        setError(data?.error || "Refund failed.");
+        return;
+      }
+      const msg = data?.already
+        ? "Order was already refunded."
+        : data?.restocked?.length
+          ? "Order refunded and stock restored."
+          : "Order refunded.";
+      setSuccess(msg);
+      await onResolved(msg);
+    } catch {
+      setError("Refund failed.");
+    } finally {
+      setRefunding(false);
+    }
+  }
+
   return (
     <div className="border border-neutral-200 p-4 space-y-3">
       <div className="flex items-start justify-between gap-4">
@@ -1024,6 +1247,26 @@ function OrderCard({
         >
           {row.piiRedactedAt ? "Customer Data Redacted" : redactingPii ? "Redacting..." : "Redact Customer Data"}
         </button>
+        {row.email ? (
+          <button
+            type="button"
+            className="inline-flex h-8 items-center border border-neutral-300 px-3 text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
+            onClick={() => resendEmail("order_received")}
+            disabled={Boolean(resendingEmail)}
+          >
+            {resendingEmail === "order_received" ? "Resending..." : "Resend Order Email"}
+          </button>
+        ) : null}
+        {row.email && row.shipping ? (
+          <button
+            type="button"
+            className="inline-flex h-8 items-center border border-neutral-300 px-3 text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
+            onClick={() => resendEmail("shipped")}
+            disabled={Boolean(resendingEmail)}
+          >
+            {resendingEmail === "shipped" ? "Resending..." : "Resend Shipping Email"}
+          </button>
+        ) : null}
       </div>
 
       {shipToAddress ? (
@@ -1033,6 +1276,71 @@ function OrderCard({
         </div>
       ) : row.piiRedactedAt ? (
         <div className="text-xs text-neutral-500">Customer address was redacted from this record.</div>
+      ) : null}
+
+      {row.channel !== "terminal" && !row.piiRedactedAt && !terminalOrderState ? (
+        <details className="border border-neutral-200 p-2">
+          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-neutral-600">
+            Edit Address
+          </summary>
+          <form onSubmit={updateShippingAddress} className="mt-3 grid gap-2 md:grid-cols-2">
+            <input
+              name="name"
+              placeholder="Name"
+              defaultValue={row.shippingAddress?.name || ""}
+              className="h-10 border border-neutral-300 px-3 text-sm"
+            />
+            <input
+              name="phone"
+              placeholder="Phone"
+              defaultValue={row.shippingAddress?.phone || ""}
+              className="h-10 border border-neutral-300 px-3 text-sm"
+            />
+            <input
+              name="line1"
+              placeholder="Address line 1"
+              defaultValue={row.shippingAddress?.line1 || ""}
+              className="h-10 border border-neutral-300 px-3 text-sm md:col-span-2"
+              required
+            />
+            <input
+              name="line2"
+              placeholder="Address line 2"
+              defaultValue={row.shippingAddress?.line2 || ""}
+              className="h-10 border border-neutral-300 px-3 text-sm md:col-span-2"
+            />
+            <input
+              name="city"
+              placeholder="City"
+              defaultValue={row.shippingAddress?.city || ""}
+              className="h-10 border border-neutral-300 px-3 text-sm"
+            />
+            <input
+              name="state"
+              placeholder="State"
+              defaultValue={row.shippingAddress?.state || ""}
+              className="h-10 border border-neutral-300 px-3 text-sm"
+            />
+            <input
+              name="postalCode"
+              placeholder="Postal code"
+              defaultValue={row.shippingAddress?.postalCode || ""}
+              className="h-10 border border-neutral-300 px-3 text-sm"
+            />
+            <input
+              name="country"
+              placeholder="Country"
+              defaultValue={row.shippingAddress?.country || "US"}
+              className="h-10 border border-neutral-300 px-3 text-sm"
+            />
+            <button
+              disabled={updatingAddress}
+              className="h-10 border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 disabled:opacity-50 md:col-span-2"
+            >
+              {updatingAddress ? "Saving..." : "Save Address"}
+            </button>
+          </form>
+        </details>
       ) : null}
 
       <div className="flex flex-wrap gap-2">
@@ -1136,6 +1444,49 @@ function OrderCard({
         </ul>
       </div>
 
+      <div className="border border-neutral-200 p-2 text-xs text-neutral-700">
+        <p className="uppercase tracking-[0.12em] text-neutral-500">Notes</p>
+        {row.notes && row.notes.length > 0 ? (
+          <ul className="mt-2 space-y-2">
+            {row.notes.map((note) => (
+              <li key={note.id} className="border-t border-neutral-100 pt-2 first:border-t-0 first:pt-0">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-neutral-500">
+                  <span className="uppercase tracking-[0.12em]">{note.kind === "follow_up" ? "Follow-up" : "Internal"}</span>
+                  <span>{formatDate(note.createdAt)}</span>
+                </div>
+                <p className="mt-1 whitespace-pre-line text-sm text-neutral-800">{note.note}</p>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-1 text-neutral-500">No notes yet.</p>
+        )}
+        <form onSubmit={addOrderNote} className="mt-3 grid gap-2">
+          <textarea
+            value={newNote}
+            onChange={(event) => setNewNote(event.target.value)}
+            className="min-h-20 border border-neutral-300 p-2 text-sm"
+            placeholder="Add internal note or follow-up log"
+          />
+          <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <select
+              value={newNoteKind}
+              onChange={(event) => setNewNoteKind(event.target.value === "follow_up" ? "follow_up" : "internal")}
+              className="h-10 border border-neutral-300 px-2 text-sm"
+            >
+              <option value="internal">Internal note</option>
+              <option value="follow_up">Follow-up log</option>
+            </select>
+            <button
+              disabled={addingNote}
+              className="h-10 border border-neutral-300 px-3 text-sm font-semibold hover:bg-neutral-50 disabled:opacity-50"
+            >
+              {addingNote ? "Saving..." : "Add Note"}
+            </button>
+          </div>
+        </form>
+      </div>
+
       {row.status === "stock_conflict" ? (
         <div className="space-y-2">
           <p className="text-xs text-red-600">
@@ -1166,6 +1517,63 @@ function OrderCard({
             <p>Resolved at: {formatDate(row.conflictResolution.resolvedAt)}</p>
           ) : null}
         </div>
+      ) : null}
+
+      {row.refund ? (
+        <div className="border border-neutral-200 p-2 text-xs text-neutral-700">
+          <p className="uppercase tracking-[0.12em] text-neutral-500">Refund</p>
+          <p className="mt-1">
+            {formatMoney(row.refund.amount, row.refund.currency)} | {row.refund.refundId || "Stripe refund"} |{" "}
+            {row.refund.restocked ? "Restocked" : "No restock recorded"}
+          </p>
+          {row.refund.note ? <p className="mt-1 whitespace-pre-line">{row.refund.note}</p> : null}
+        </div>
+      ) : null}
+
+      {canRefund ? (
+        <details className="border border-neutral-200 p-2">
+          <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-neutral-600">
+            Refund / Cancel
+          </summary>
+          <form onSubmit={refundOrder} className="mt-3 grid gap-2">
+            <select
+              value={refundReason}
+              onChange={(event) =>
+                setRefundReason(
+                  event.target.value === "duplicate" || event.target.value === "fraudulent"
+                    ? event.target.value
+                    : "requested_by_customer"
+                )
+              }
+              className="h-10 border border-neutral-300 px-2 text-sm"
+            >
+              <option value="requested_by_customer">Requested by customer</option>
+              <option value="duplicate">Duplicate charge/order</option>
+              <option value="fraudulent">Fraudulent</option>
+            </select>
+            <label className="flex items-center gap-2 text-sm text-neutral-700">
+              <input
+                type="checkbox"
+                checked={refundRestock}
+                onChange={(event) => setRefundRestock(event.target.checked)}
+                disabled={row.status === "shipped" || row.status === "stock_conflict"}
+              />
+              <span>Restock order items</span>
+            </label>
+            <textarea
+              value={refundNote}
+              onChange={(event) => setRefundNote(event.target.value)}
+              className="min-h-20 border border-neutral-300 p-2 text-sm"
+              placeholder="Refund/cancellation note"
+            />
+            <button
+              disabled={refunding}
+              className="h-10 border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 disabled:opacity-50"
+            >
+              {refunding ? "Refunding..." : "Refund in Stripe"}
+            </button>
+          </form>
+        </details>
       ) : null}
 
       {row.status === "paid" ? (

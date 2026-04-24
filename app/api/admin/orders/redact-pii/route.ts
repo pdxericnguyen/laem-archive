@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { recordAdminAuditEvent } from "@/lib/admin-audit";
 import { redactOrderPiiById } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 
@@ -44,6 +45,17 @@ export async function POST(request: Request) {
   const result = await redactOrderPiiById(payload.orderId);
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: "Order not found" }, { status: 404 });
+  }
+  if (!result.already) {
+    await recordAdminAuditEvent({
+      action: "order_pii_redacted",
+      entity: "order",
+      entityId: payload.orderId,
+      summary: "Order customer data redacted",
+      details: {
+        reason: result.order.piiRedactionReason || null
+      }
+    });
   }
 
   return NextResponse.json({

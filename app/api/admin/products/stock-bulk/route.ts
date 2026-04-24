@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { recordAdminAuditEvent } from "@/lib/admin-audit";
 import { getStock, setStock, syncProductStockAndArchiveState } from "@/lib/inventory";
 import { recordInventoryLedgerEvent } from "@/lib/inventory-ledger";
 import { hasKvEnv } from "@/lib/kv";
@@ -73,6 +74,16 @@ export async function POST(request: Request) {
       autoArchived += 1;
     }
   }
+  await recordAdminAuditEvent({
+    action: "stock_bulk_updated",
+    entity: "product",
+    entityId: "bulk-stock",
+    summary: "Bulk stock update",
+    details: {
+      updates: updates.length,
+      autoArchived
+    }
+  });
 
   return NextResponse.json({
     ok: true,

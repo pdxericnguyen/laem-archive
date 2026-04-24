@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { recordAdminAuditEvent } from "@/lib/admin-audit";
 import { hasKvEnv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import { deleteSiteVisual, isSiteVisualPlacement } from "@/lib/site-visuals";
@@ -40,6 +41,12 @@ export async function POST(request: Request) {
   }
 
   await deleteSiteVisual(placement);
+  await recordAdminAuditEvent({
+    action: "visual_deleted",
+    entity: "visual",
+    entityId: placement,
+    summary: "Site visual deleted"
+  });
 
   if (wantsJsonResponse(request)) {
     return NextResponse.json({ ok: true, placement });

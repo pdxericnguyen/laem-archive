@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { recordAdminAuditEvent } from "@/lib/admin-audit";
 import { hasKvEnv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import {
@@ -129,6 +130,16 @@ export async function POST(request: Request) {
     linkHref: payload.linkHref,
     linkLabel: payload.linkLabel,
     published: payload.published
+  });
+  await recordAdminAuditEvent({
+    action: "visual_saved",
+    entity: "visual",
+    entityId: visual.placement,
+    summary: "Site visual saved",
+    details: {
+      published: visual.published,
+      hasImage: Boolean(visual.imageUrl)
+    }
   });
 
   if (wantsJsonResponse(request)) {

@@ -186,7 +186,7 @@ export default async function AdminVisualsPage({ searchParams }: AdminVisualsPag
                   ownerType="site_visual"
                   ownerId={definition.placement}
                   label="Visual Image"
-                  helperText="Upload one image for this placement, or paste a public image URL. It uploads when you save."
+                  helperText="Add one image for this placement. Save to apply the change."
                   placeholder="Image URL"
                   previewAlt={`${definition.label} preview`}
                   emptyLabel="Upload visual"

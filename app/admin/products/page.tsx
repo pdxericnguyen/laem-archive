@@ -56,7 +56,7 @@ const PRODUCT_CATEGORY_OPTIONS: Array<{ value: ProductCategory; label: string }>
 ];
 
 type DeleteErrorCode = "live" | "reserved";
-type SaveErrorCode = "slug_locked" | "slug_reserved" | "slug_taken" | "invalid_live_price";
+type SaveErrorCode = "slug_locked" | "slug_reserved" | "slug_taken" | "invalid_live_price" | "invalid_slug";
 
 type ProductRow = {
   product: Product;
@@ -140,6 +140,7 @@ function parseSaveErrorCode(value: string | string[] | undefined): SaveErrorCode
   return raw === "slug_locked" ||
     raw === "slug_reserved" ||
     raw === "slug_taken" ||
+    raw === "invalid_slug" ||
     raw === "invalid_live_price"
     ? raw
     : null;
@@ -359,6 +360,14 @@ function getSaveErrorMessage(saveError: SaveErrorCode | null, saveSlug: string |
     return (
       <>
         <code>{saveSlug}</code> is already used by another listing. Choose a unique slug before saving.
+      </>
+    );
+  }
+
+  if (saveError === "invalid_slug") {
+    return (
+      <>
+        <code>{saveSlug}</code> is not a valid product slug. Use lowercase letters, numbers, and single hyphens only.
       </>
     );
   }
@@ -611,7 +620,14 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
           <input type="hidden" name="returnStatusFilter" value={activeFilter} />
           <label className="grid gap-1">
             <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Slug</span>
-            <input name="slug" required className="h-10 border border-neutral-300 px-3" />
+            <input
+              name="slug"
+              required
+              pattern="[a-z0-9]+(-[a-z0-9]+)*"
+              maxLength={80}
+              title="Use lowercase letters, numbers, and single hyphens only."
+              className="h-10 border border-neutral-300 px-3"
+            />
           </label>
           <label className="grid gap-1">
             <span className="text-xs uppercase tracking-[0.12em] text-neutral-500">Title</span>
@@ -829,7 +845,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                   href={`/admin/reconciliation?slug=${encodeURIComponent(product.slug)}`}
                   className="inline-flex text-xs font-semibold text-neutral-700 underline"
                 >
-                  View stock timeline
+                  View inventory audit
                 </a>
               </div>
               <form action="/api/admin/products/save" method="POST" className="grid gap-3 text-sm">
@@ -844,6 +860,9 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                   <input
                     name="slug"
                     required
+                    pattern="[a-z0-9]+(-[a-z0-9]+)*"
+                    maxLength={80}
+                    title="Use lowercase letters, numbers, and single hyphens only."
                     className={`h-10 border px-3 ${
                       slugLocked
                         ? "border-neutral-200 bg-neutral-50 text-neutral-500"

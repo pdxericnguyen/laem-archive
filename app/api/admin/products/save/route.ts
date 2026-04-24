@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { recordAdminAuditEvent } from "@/lib/admin-audit";
 import {
   getProductInventoryItemId,
   getStock,
@@ -8,6 +9,7 @@ import {
 } from "@/lib/inventory";
 import { recordInventoryLedgerEvent } from "@/lib/inventory-ledger";
 import { hasKvEnv, key, kv } from "@/lib/kv";
+import { validateProductSlug } from "@/lib/product-slug";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import type { Product, ProductCategory } from "@/lib/store";
 
@@ -137,7 +139,7 @@ function buildRedirectUrl(
   request: Request,
   payload: ProductPayload,
   params?: {
-    saveError?: "slug_locked" | "slug_reserved" | "slug_taken" | "invalid_live_price";
+    saveError?: "slug_locked" | "slug_reserved" | "slug_taken" | "invalid_live_price" | "invalid_slug";
     saveSlug?: string;
   }
 ) {
@@ -266,6 +268,30 @@ export async function POST(request: Request) {
   if (!payload) {
     return new Response("Invalid payload", { status: 400 });
   }
+
+  const slugValidation = validateProductSlug(payload.slug);
+  if (!slugValidation.ok) {
+    const wantsJson = wantsJsonResponse(request);
+    if (wantsJson) {
+      return Response.json(
+        {
+          ok: false,
+          error: slugValidation.error,
+          code: "invalid_slug"
+        },
+        { status: 400 }
+      );
+    }
+
+    return Response.redirect(
+      buildRedirectUrl(request, payload, {
+        saveError: "invalid_slug",
+        saveSlug: payload.slug
+      }),
+      303
+    );
+  }
+  payload.slug = slugValidation.slug;
 
   const normalizedStock = clampToNonNegativeInt(payload.stock);
   const normalizedPrice = clampToNonNegativeInt(payload.priceCents);
@@ -447,6 +473,19 @@ export async function POST(request: Request) {
       ...products.map((item) => item.slug)
     );
   }
+  await recordAdminAuditEvent({
+    action: "product_saved",
+    entity: "product",
+    entityId: product.slug,
+    summary: existingProduct ? "Product saved" : "Product created",
+    details: {
+      originalSlug,
+      status: payload.status,
+      stock: normalizedStock,
+      priceCents: normalizedPrice,
+      renamed: originalSlug !== product.slug
+    }
+  });
 
   if (wantsJson) {
     return Response.json({ ok: true, product });

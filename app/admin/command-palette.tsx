@@ -12,10 +12,12 @@ type Command = {
 
 const COMMANDS: Command[] = [
   { id: "admin", label: "Go to Admin Home", href: "/admin", keywords: "dashboard home" },
-  { id: "reconciliation", label: "Go to Reconciliation", href: "/admin/reconciliation", keywords: "reconcile inventory timeline stripe payments" },
+  { id: "reconciliation", label: "Go to Inventory Audit", href: "/admin/reconciliation", keywords: "audit inventory timeline stock holds stripe payments reconcile" },
   { id: "orders", label: "Go to Orders", href: "/admin/orders", keywords: "orders fulfillment shipping" },
   { id: "products", label: "Go to Products", href: "/admin/products", keywords: "catalog stock inventory" },
-  { id: "visuals", label: "Go to Site Visuals", href: "/admin/visuals", keywords: "visuals campaign banners" }
+  { id: "visuals", label: "Go to Site Visuals", href: "/admin/visuals", keywords: "visuals campaign banners" },
+  { id: "settings", label: "Go to System Settings", href: "/admin/settings", keywords: "settings tax shipping export refunds" },
+  { id: "audit", label: "Go to Audit Log", href: "/admin/audit", keywords: "audit log activity history actions" }
 ];
 
 function isEditableTarget(target: EventTarget | null) {
@@ -87,6 +89,16 @@ export default function AdminCommandPalette() {
           setPendingGoto(false);
           return;
         }
+        if (key === "s") {
+          router.push("/admin/settings");
+          setPendingGoto(false);
+          return;
+        }
+        if (key === "a") {
+          router.push("/admin/audit");
+          setPendingGoto(false);
+          return;
+        }
       }
 
       if (open && key === "escape") {
@@ -115,7 +127,7 @@ export default function AdminCommandPalette() {
         >
           Jump (Cmd/Ctrl+K)
         </button>
-        <span>Shortcuts: `g o` Orders, `g p` Products, `g v` Visuals, `g r` Reconcile</span>
+        <span>Shortcuts: `g o` Orders, `g p` Products, `g v` Visuals, `g r` Audit, `g s` Settings</span>
       </div>
 
       {open ? (

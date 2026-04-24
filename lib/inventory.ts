@@ -271,6 +271,13 @@ function parseNumberResult(value: unknown, fallback = 0) {
   return fallback;
 }
 
+export function getInventoryScriptStatus(response: unknown): "success" | "inactive" | "unknown" {
+  if (!Array.isArray(response) || response.length === 0) {
+    return "unknown";
+  }
+  return parseNumberResult(response[0]) === 1 ? "success" : "inactive";
+}
+
 export function getLowStockThreshold() {
   const configured = Number(process.env.LOW_STOCK_THRESHOLD || "2");
   if (!Number.isFinite(configured)) {
@@ -853,9 +860,22 @@ return {1}
   ];
 
   try {
-    await kv.eval(script, keys, args);
-    await recordReservationReleasedEvents(sessionId, reservation, nextStatus);
-    return { ok: true, status: "released", reservation };
+    const response = await kv.eval(script, keys, args);
+    const scriptStatus = getInventoryScriptStatus(response);
+    if (scriptStatus === "success") {
+      await recordReservationReleasedEvents(sessionId, reservation, nextStatus);
+      return { ok: true, status: "released", reservation };
+    }
+
+    if (scriptStatus === "inactive") {
+      return { ok: false, status: "inactive", reservation };
+    }
+
+    console.error("Inventory reservation release eval returned an unexpected response", {
+      sessionId,
+      response
+    });
+    return { ok: false, status: "inactive", reservation };
   } catch (error) {
     console.error("Inventory reservation release eval failed; falling back to sequential release", {
       error,
@@ -1009,7 +1029,8 @@ return out
 
   try {
     const response = (await kv.eval(script, keys, args)) as unknown;
-    if (Array.isArray(response) && parseNumberResult(response[0]) === 1) {
+    const scriptStatus = getInventoryScriptStatus(response);
+    if (scriptStatus === "success" && Array.isArray(response)) {
       const result: ConsumeInventoryReservationResult = {
         ok: true,
         source: "reservation",
@@ -1025,6 +1046,16 @@ return out
       await recordReservationCompletedEvents(sessionId, reservation);
       return result;
     }
+
+    if (scriptStatus === "inactive") {
+      return null;
+    }
+
+    console.error("Reservation consume eval returned an unexpected response", {
+      sessionId,
+      response
+    });
+    return null;
   } catch (error) {
     console.error("Reservation consume eval failed; falling back to sequential consume", {
       error,

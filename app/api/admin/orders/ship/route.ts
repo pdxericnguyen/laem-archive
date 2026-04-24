@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { recordAdminAuditEvent } from "@/lib/admin-audit";
 import { sendShippedEmail } from "@/lib/email";
 import { readOrder, writeOrder } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
@@ -96,6 +97,13 @@ export async function POST(request: Request) {
     );
   }
 
+  if (order.status === "refunded" || order.status === "canceled") {
+    return NextResponse.json(
+      { ok: false, error: "Refunded or canceled orders cannot be marked shipped." },
+      { status: 409 }
+    );
+  }
+
   if (order.channel !== "terminal" && !order.shippingAddress?.line1) {
     return NextResponse.json(
       { ok: false, error: "Missing shipping address. Sync from Stripe before marking shipped." },
@@ -122,6 +130,16 @@ export async function POST(request: Request) {
   };
 
   await writeOrder(updatedOrder);
+  await recordAdminAuditEvent({
+    action: "order_marked_shipped",
+    entity: "order",
+    entityId: order.id,
+    summary: "Order marked shipped",
+    details: {
+      carrier: payload.carrier,
+      trackingNumber: payload.trackingNumber
+    }
+  });
 
   const email = order.email;
   if (email) {

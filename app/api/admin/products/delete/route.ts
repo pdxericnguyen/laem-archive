@@ -1,4 +1,5 @@
 import { deleteBlobIfUnreferenced } from "@/lib/blob-assets";
+import { recordAdminAuditEvent } from "@/lib/admin-audit";
 import { deleteStockForSlug, summarizeReservationHoldsForSlugs } from "@/lib/inventory";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { requireAdminOrThrow } from "@/lib/require-admin";
@@ -246,6 +247,15 @@ export async function POST(request: Request) {
       });
     }
   }
+  await recordAdminAuditEvent({
+    action: "product_deleted",
+    entity: "product",
+    entityId: payload.slug,
+    summary: "Product deleted",
+    details: {
+      images: imageUrls.length
+    }
+  });
 
   const wantsJson = wantsJsonResponse(request);
   if (wantsJson) {

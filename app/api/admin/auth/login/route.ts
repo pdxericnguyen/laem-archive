@@ -5,6 +5,7 @@ import {
   ADMIN_SESSION_TTL_SECONDS,
   createAdminSessionToken
 } from "@/lib/admin-session";
+import { recordAdminAuditEvent } from "@/lib/admin-audit";
 import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
 
 type LoginPayload = {
@@ -64,6 +65,12 @@ export async function POST(request: Request) {
 
   const sessionToken = await createAdminSessionToken();
   const response = NextResponse.json({ ok: true }, { headers: rateLimitHeaders });
+  await recordAdminAuditEvent({
+    action: "admin_login",
+    entity: "auth",
+    entityId: "admin",
+    summary: "Admin signed in"
+  });
 
   response.cookies.set({
     name: ADMIN_SESSION_COOKIE,

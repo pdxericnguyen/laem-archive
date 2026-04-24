@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
+import { recordAdminAuditEvent } from "@/lib/admin-audit";
 import { readOrder, type OrderShippingAddress, writeOrder } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 import { retryStripeOperation } from "@/lib/stripe-retry";
@@ -136,6 +137,17 @@ export async function POST(request: Request) {
   await writeOrder({
     ...order,
     shippingAddress
+  });
+  await recordAdminAuditEvent({
+    action: "order_address_updated",
+    entity: "order",
+    entityId: order.id,
+    summary: "Order shipping address synced from Stripe",
+    details: {
+      city: shippingAddress.city,
+      state: shippingAddress.state,
+      country: shippingAddress.country
+    }
   });
 
   return NextResponse.json({ ok: true, shippingAddress });

@@ -1,6 +1,6 @@
 import { key, kv } from "@/lib/kv";
 
-export type OrderStatus = "paid" | "shipped" | "stock_conflict" | "conflict_resolved";
+export type OrderStatus = "paid" | "shipped" | "stock_conflict" | "conflict_resolved" | "refunded" | "canceled";
 export type OrderStatusFilter = "all" | OrderStatus;
 export type OrderQueueFilter =
   | "all"
@@ -59,6 +59,23 @@ export type OrderConflictResolution = {
   resolvedAt: number;
 };
 
+export type OrderRefund = {
+  refundId: string | null;
+  amount: number | null;
+  currency: string | null;
+  reason: string | null;
+  restocked: boolean;
+  refundedAt: number;
+  note?: string | null;
+};
+
+export type OrderNote = {
+  id: string;
+  note: string;
+  createdAt: number;
+  kind: "internal" | "follow_up";
+};
+
 export type OrderLineItem = {
   slug: string;
   quantity: number;
@@ -81,6 +98,8 @@ export type OrderRecord = {
   printing?: OrderPrinting;
   fulfillment?: OrderFulfillment;
   conflictResolution?: OrderConflictResolution;
+  refund?: OrderRefund;
+  notes?: OrderNote[];
   piiRedactedAt?: number;
   piiRedactionReason?: OrderPiiRedactionReason;
 };
@@ -95,12 +114,30 @@ type OrderProcessingLockResult =
       reason: "already_processed" | "busy";
     };
 
+type OrderFulfillmentLockResult =
+  | {
+      ok: true;
+      token: string;
+    }
+  | {
+      ok: false;
+      reason: "busy";
+    };
+
 function getOrderProcessingLockTtlSeconds() {
   const parsed = Number(process.env.WEBHOOK_ORDER_LOCK_TTL_SECONDS || "900");
   if (!Number.isFinite(parsed)) {
     return 900;
   }
   return Math.max(30, Math.min(3600, Math.floor(parsed)));
+}
+
+function getOrderFulfillmentLockTtlSeconds() {
+  const parsed = Number(process.env.ORDER_FULFILLMENT_LOCK_TTL_SECONDS || "300");
+  if (!Number.isFinite(parsed)) {
+    return 300;
+  }
+  return Math.max(30, Math.min(1800, Math.floor(parsed)));
 }
 
 function generateOrderProcessingLockToken() {
@@ -189,6 +226,21 @@ type LooseOrderRecord = {
     note?: unknown;
     resolvedAt?: unknown;
   } | null;
+  refund?: {
+    refundId?: unknown;
+    amount?: unknown;
+    currency?: unknown;
+    reason?: unknown;
+    restocked?: unknown;
+    refundedAt?: unknown;
+    note?: unknown;
+  } | null;
+  notes?: Array<{
+    id?: unknown;
+    note?: unknown;
+    createdAt?: unknown;
+    kind?: unknown;
+  }> | null;
   piiRedactedAt?: unknown;
   piiRedactionReason?: unknown;
 };
@@ -207,6 +259,12 @@ function normalizeStatus(value: unknown): OrderStatus {
   }
   if (value === "conflict_resolved") {
     return "conflict_resolved";
+  }
+  if (value === "refunded") {
+    return "refunded";
+  }
+  if (value === "canceled" || value === "cancelled") {
+    return "canceled";
   }
   return value === "shipped" ? "shipped" : "paid";
 }
@@ -376,6 +434,63 @@ function normalizeConflictResolution(
   };
 }
 
+function normalizeRefund(value: LooseOrderRecord["refund"]): OrderRefund | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const refundedAt = asNumber(value.refundedAt);
+  if (refundedAt === null) {
+    return undefined;
+  }
+
+  const refund: OrderRefund = {
+    refundId: asString(value.refundId),
+    amount: asNumber(value.amount),
+    currency: asString(value.currency),
+    reason: asString(value.reason),
+    restocked: Boolean(value.restocked),
+    refundedAt
+  };
+
+  const note = asString(value.note);
+  if (note) {
+    refund.note = note;
+  }
+
+  return refund;
+}
+
+function normalizeOrderNote(value: unknown): OrderNote | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const row = value as Record<string, unknown>;
+  const id = asString(row.id);
+  const note = asString(row.note);
+  const createdAt = asNumber(row.createdAt);
+  if (!id || !note || createdAt === null) {
+    return null;
+  }
+
+  return {
+    id,
+    note,
+    createdAt,
+    kind: row.kind === "follow_up" ? "follow_up" : "internal"
+  };
+}
+
+function normalizeOrderNotes(value: LooseOrderRecord["notes"]): OrderNote[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  const notes = value.map(normalizeOrderNote).filter((row): row is OrderNote => Boolean(row));
+  return notes.length > 0 ? notes : undefined;
+}
+
 function normalizeLineItems(value: LooseOrderRecord["items"]) {
   if (!Array.isArray(value)) {
     return undefined;
@@ -446,6 +561,8 @@ export function normalizeOrder(input: unknown): OrderRecord | null {
     printing: normalizePrinting(raw.printing),
     fulfillment: normalizeFulfillment(raw.fulfillment),
     conflictResolution: normalizeConflictResolution(raw.conflictResolution),
+    refund: normalizeRefund(raw.refund),
+    notes: normalizeOrderNotes(raw.notes),
     piiRedactedAt: piiRedactedAt ?? undefined,
     piiRedactionReason
   };
@@ -562,6 +679,34 @@ return 0
   return { ok: false, reason: "busy" };
 }
 
+export async function acquireOrderFulfillmentLock(orderId: string): Promise<OrderFulfillmentLockResult> {
+  const ttlSeconds = getOrderFulfillmentLockTtlSeconds();
+  const lockToken = generateOrderProcessingLockToken();
+
+  const script = `
+local lockKey = KEYS[1]
+local lockToken = ARGV[1]
+local ttlSeconds = tonumber(ARGV[2]) or 300
+
+local acquired = redis.call("SET", lockKey, lockToken, "NX", "EX", ttlSeconds)
+if acquired then
+  return 1
+end
+
+return 0
+`;
+
+  const result = Number(
+    await kv.eval(script, [key.orderFulfillmentLock(orderId)], [lockToken, String(ttlSeconds)])
+  );
+
+  if (result === 1) {
+    return { ok: true, token: lockToken };
+  }
+
+  return { ok: false, reason: "busy" };
+}
+
 export async function releaseOrderProcessingLock(orderId: string, token: string) {
   const script = `
 local lockKey = KEYS[1]
@@ -578,8 +723,57 @@ return 0
   await kv.eval(script, [key.orderProcessingLock(orderId)], [token]);
 }
 
+export async function releaseOrderFulfillmentLock(orderId: string, token: string) {
+  const script = `
+local lockKey = KEYS[1]
+local lockToken = ARGV[1]
+
+if redis.call("GET", lockKey) == lockToken then
+  redis.call("DEL", lockKey)
+  return 1
+end
+
+return 0
+`;
+
+  await kv.eval(script, [key.orderFulfillmentLock(orderId)], [token]);
+}
+
 export async function appendOrderToIndex(id: string) {
-  await kv.lpush(key.ordersIndex, id);
+  const orderId = id.trim();
+  if (!orderId) {
+    return false;
+  }
+
+  const script = `
+local indexKey = KEYS[1]
+local orderId = ARGV[1]
+
+if redis.call("LPOS", indexKey, orderId) then
+  return 0
+end
+
+redis.call("LPUSH", indexKey, orderId)
+return 1
+`;
+
+  try {
+    const result = Number(await kv.eval(script, [key.ordersIndex], [orderId]));
+    return result === 1;
+  } catch (error) {
+    console.error("Order index append eval failed; falling back to list scan", {
+      orderId,
+      error
+    });
+  }
+
+  const ids = (await kv.lrange<string>(key.ordersIndex, 0, 4999)) || [];
+  if (ids.includes(orderId)) {
+    return false;
+  }
+
+  await kv.lpush(key.ordersIndex, orderId);
+  return true;
 }
 
 export async function listRecentOrders(limit: number) {

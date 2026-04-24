@@ -137,7 +137,7 @@ export function buildReconciliationSummary(input: {
       id: `missing-order-${payment.id}`,
       severity: "high" as const,
       label: `${payment.channel === "terminal" ? "POS" : "Stripe Checkout"} payment missing LAEM order`,
-      detail: `${payment.id} is paid in Stripe but was not found in the LAEM order index checked here.`,
+      detail: `${payment.id} is paid in Stripe but was not found in the LAEM order index checked here. This should be rare and usually means webhook or Redis recovery needs attention.`,
       href: payment.dashboardUrl
     })),
     ...stockConflicts.map((order) => ({
@@ -150,8 +150,8 @@ export function buildReconciliationSummary(input: {
     ...missingInventoryIdentities.map((product) => ({
       id: `missing-inventory-id-${product.slug}`,
       severity: "medium" as const,
-      label: "Product missing inventory identity",
-      detail: `${product.slug} does not have an inventoryItemId, so it is unavailable until recreated or saved into the new stock model.`,
+      label: "Legacy product missing inventory identity",
+      detail: `${product.slug} does not have an inventoryItemId. This is mostly a migration cleanup check for older products.`,
       href: `/admin/reconciliation?slug=${encodeURIComponent(product.slug)}`
     }))
   ];
