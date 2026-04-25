@@ -5,7 +5,7 @@ import {
   normalizeInventoryLedgerEvent
 } from "../../lib/inventory-ledger";
 import { getProductInventoryItemId } from "../../lib/inventory";
-import { buildReconciliationSummary } from "../../lib/reconciliation";
+import { buildDevDiagnosticsSummary } from "../../lib/dev-diagnostics";
 
 test("inventory ledger events normalize into operator-readable rows", () => {
   const event = normalizeInventoryLedgerEvent({
@@ -53,8 +53,8 @@ test("inventory identity requires a stable inventory id", () => {
   ).toBeNull();
 });
 
-test("reconciliation summary flags missing orders and missing inventory identities", () => {
-  const summary = buildReconciliationSummary({
+test("dev diagnostics summary flags missing orders and missing inventory identities", () => {
+  const summary = buildDevDiagnosticsSummary({
     orders: [
       {
         id: "cs_known",

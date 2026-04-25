@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { getAdminQueueButtonClass } from "@/lib/admin-ui";
 
 type OrderStatus =
   | "paid"
@@ -124,6 +125,9 @@ const QUEUE_PRESETS: Array<{ id: QueueFilter; label: string }> = [
   { id: "print_failed", label: "Print Failed" },
   { id: "conflicts", label: "Conflicts" }
 ];
+
+const primaryActionButtonClass =
+  "border border-silver-border bg-silver text-silver-text transition-colors hover:bg-silver-hover active:bg-silver-active disabled:bg-silver-disabled disabled:text-neutral-500 disabled:cursor-not-allowed";
 
 function parseFiltersFromUrl() {
   if (typeof window === "undefined") {
@@ -563,24 +567,23 @@ export default function OrdersClient() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap gap-2 border border-neutral-200 p-3">
-        {QUEUE_PRESETS.map((preset) => {
-          const active = filters.queue === preset.id;
-          return (
-            <button
-              key={preset.id}
-              type="button"
-              onClick={() => setQueuePreset(preset.id)}
-              className={`h-9 border px-3 text-xs font-semibold uppercase tracking-[0.12em] ${
-                active
-                  ? "border-neutral-900 bg-neutral-900 text-white"
-                  : "border-neutral-300 text-neutral-700 hover:bg-neutral-50"
-              }`}
-            >
-              {preset.label}
-            </button>
-          );
-        })}
+      <div className="space-y-2 border border-neutral-200 bg-neutral-50/40 p-3">
+        <p className="text-[11px] uppercase tracking-[0.12em] text-neutral-500">Queue</p>
+        <div className="flex flex-wrap gap-2">
+          {QUEUE_PRESETS.map((preset) => {
+            const active = filters.queue === preset.id;
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => setQueuePreset(preset.id)}
+                className={getAdminQueueButtonClass(active)}
+              >
+                {preset.label}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <form onSubmit={applyFilters} className="grid gap-2 border border-neutral-200 p-3 md:grid-cols-6">
@@ -654,7 +657,7 @@ export default function OrdersClient() {
         </label>
         <button
           type="submit"
-          className="h-10 border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 md:self-end"
+          className={`h-10 text-sm font-semibold md:self-end ${primaryActionButtonClass}`}
         >
           Apply Filters
         </button>
@@ -693,7 +696,7 @@ export default function OrdersClient() {
               type="button"
               onClick={bulkAutoFulfill}
               disabled={bulkWorking || selectedIds.length === 0}
-              className="h-8 border border-neutral-300 px-3 text-xs font-semibold hover:bg-neutral-50 disabled:opacity-50"
+              className={`h-8 px-3 text-xs font-semibold ${primaryActionButtonClass}`}
             >
               {bulkWorking ? "Working..." : "Bulk Auto-Fulfill"}
             </button>
@@ -799,6 +802,8 @@ function OrderCard({
   const [newNote, setNewNote] = useState("");
   const [newNoteKind, setNewNoteKind] = useState<"internal" | "follow_up">("internal");
   const [refundNote, setRefundNote] = useState("");
+  const [refundStep, setRefundStep] = useState<"locked" | "ready">("locked");
+  const [refundOrderIdConfirm, setRefundOrderIdConfirm] = useState("");
   const [refundReason, setRefundReason] = useState<"requested_by_customer" | "duplicate" | "fraudulent">(
     "requested_by_customer"
   );
@@ -819,10 +824,23 @@ function OrderCard({
     row.status === "stock_conflict" ||
     row.status === "conflict_resolved" ||
     row.status === "shipped";
+  const hasPrintIssue =
+    row.printing?.packingSlip?.status === "failed" ||
+    row.printing?.packingSlip?.status === "disabled" ||
+    row.printing?.shippingLabel?.status === "failed" ||
+    row.printing?.shippingLabel?.status === "disabled";
+  const workspaceInitiallyOpen =
+    row.status === "stock_conflict" || (row.status === "paid" && missingShippingAddress);
+  const refundConfirmationMatches = refundOrderIdConfirm.trim() === row.id;
 
   useEffect(() => {
     setRefundRestock(row.status !== "shipped" && row.status !== "stock_conflict" && refundRestockDefault);
   }, [refundRestockDefault, row.id, row.status]);
+
+  useEffect(() => {
+    setRefundStep("locked");
+    setRefundOrderIdConfirm("");
+  }, [row.id]);
 
   async function copyText(value: string, label: string) {
     try {
@@ -1139,12 +1157,8 @@ function OrderCard({
 
   async function refundOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const confirmed = window.confirm(
-      refundRestock
-        ? "Refund this order in Stripe and restock its items?"
-        : "Refund this order in Stripe without changing stock?"
-    );
-    if (!confirmed) {
+    if (refundStep !== "ready" || !refundConfirmationMatches) {
+      setError("Type the full order ID to confirm refund.");
       return;
     }
 
@@ -1174,6 +1188,8 @@ function OrderCard({
           ? "Order refunded and stock restored."
           : "Order refunded.";
       setSuccess(msg);
+      setRefundStep("locked");
+      setRefundOrderIdConfirm("");
       await onResolved(msg);
     } catch {
       setError("Refund failed.");
@@ -1210,6 +1226,34 @@ function OrderCard({
         <div className="text-xs uppercase tracking-[0.12em] text-neutral-600">{toStatusLabel(row.status)}</div>
       </div>
 
+      <div className="flex flex-wrap gap-2 text-[11px]">
+        {row.status === "stock_conflict" ? (
+          <span className="inline-flex items-center border border-rose-300 bg-rose-50 px-2 py-1 font-semibold text-rose-800">
+            Stock conflict
+          </span>
+        ) : null}
+        {missingShippingAddress ? (
+          <span className="inline-flex items-center border border-amber-300 bg-amber-50 px-2 py-1 font-semibold text-amber-800">
+            Address missing
+          </span>
+        ) : null}
+        {hasPrintIssue ? (
+          <span className="inline-flex items-center border border-rose-300 bg-rose-50 px-2 py-1 font-semibold text-rose-800">
+            Print issue
+          </span>
+        ) : null}
+        {row.status === "paid" ? (
+          <span className="inline-flex items-center border border-blue-300 bg-blue-50 px-2 py-1 font-semibold text-blue-800">
+            Needs fulfillment
+          </span>
+        ) : null}
+      </div>
+
+      <details className="border border-neutral-200 p-2" open={workspaceInitiallyOpen || undefined}>
+        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-neutral-600">
+          Order Workspace
+        </summary>
+        <div className="mt-3 space-y-3">
       <div className="flex flex-wrap gap-2">
         {row.stripe_dashboard_url ? (
           <a
@@ -1431,21 +1475,27 @@ function OrderCard({
         </div>
       ) : null}
 
-      <div className="border border-neutral-200 p-2 text-xs text-neutral-700">
-        <p className="uppercase tracking-[0.12em] text-neutral-500">Timeline</p>
-        <ul className="mt-1 space-y-1">
-          {timeline.map((event) => (
-            <li key={event.id}>
-              <span className="font-semibold">{event.label}</span>
-              {event.at ? ` - ${formatDate(event.at)}` : ""}
-              {event.detail ? ` (${event.detail})` : ""}
-            </li>
-          ))}
-        </ul>
-      </div>
+      {timeline.length > 1 ? (
+        <details className="border border-neutral-200 p-2 text-xs text-neutral-700">
+          <summary className="cursor-pointer font-semibold uppercase tracking-[0.12em] text-neutral-500">
+            Activity ({timeline.length})
+          </summary>
+          <ul className="mt-2 space-y-1">
+            {timeline.map((event) => (
+              <li key={event.id}>
+                <span className="font-semibold">{event.label}</span>
+                {event.at ? ` - ${formatDate(event.at)}` : ""}
+                {event.detail ? ` (${event.detail})` : ""}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
 
-      <div className="border border-neutral-200 p-2 text-xs text-neutral-700">
-        <p className="uppercase tracking-[0.12em] text-neutral-500">Notes</p>
+      <details className="border border-neutral-200 p-2 text-xs text-neutral-700">
+        <summary className="cursor-pointer font-semibold uppercase tracking-[0.12em] text-neutral-500">
+          Notes ({row.notes?.length || 0})
+        </summary>
         {row.notes && row.notes.length > 0 ? (
           <ul className="mt-2 space-y-2">
             {row.notes.map((note) => (
@@ -1459,7 +1509,7 @@ function OrderCard({
             ))}
           </ul>
         ) : (
-          <p className="mt-1 text-neutral-500">No notes yet.</p>
+          <p className="mt-2 text-neutral-500">No notes yet.</p>
         )}
         <form onSubmit={addOrderNote} className="mt-3 grid gap-2">
           <textarea
@@ -1485,7 +1535,7 @@ function OrderCard({
             </button>
           </div>
         </form>
-      </div>
+      </details>
 
       {row.status === "stock_conflict" ? (
         <div className="space-y-2">
@@ -1535,44 +1585,85 @@ function OrderCard({
           <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-neutral-600">
             Refund / Cancel
           </summary>
-          <form onSubmit={refundOrder} className="mt-3 grid gap-2">
-            <select
-              value={refundReason}
-              onChange={(event) =>
-                setRefundReason(
-                  event.target.value === "duplicate" || event.target.value === "fraudulent"
-                    ? event.target.value
-                    : "requested_by_customer"
-                )
-              }
-              className="h-10 border border-neutral-300 px-2 text-sm"
-            >
-              <option value="requested_by_customer">Requested by customer</option>
-              <option value="duplicate">Duplicate charge/order</option>
-              <option value="fraudulent">Fraudulent</option>
-            </select>
-            <label className="flex items-center gap-2 text-sm text-neutral-700">
-              <input
-                type="checkbox"
-                checked={refundRestock}
-                onChange={(event) => setRefundRestock(event.target.checked)}
-                disabled={row.status === "shipped" || row.status === "stock_conflict"}
+          {refundStep === "locked" ? (
+            <div className="mt-3 space-y-2 text-xs text-neutral-600">
+              <p>Refund is hidden by default to prevent accidental clicks.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRefundStep("ready");
+                  setError(null);
+                  setSuccess(null);
+                }}
+                className="h-9 border border-neutral-300 px-3 text-xs font-semibold uppercase tracking-[0.12em] text-neutral-700 hover:bg-neutral-50"
+              >
+                Begin Refund
+              </button>
+            </div>
+          ) : (
+            <form onSubmit={refundOrder} className="mt-3 grid gap-2">
+              <select
+                value={refundReason}
+                onChange={(event) =>
+                  setRefundReason(
+                    event.target.value === "duplicate" || event.target.value === "fraudulent"
+                      ? event.target.value
+                      : "requested_by_customer"
+                  )
+                }
+                className="h-10 border border-neutral-300 px-2 text-sm"
+              >
+                <option value="requested_by_customer">Requested by customer</option>
+                <option value="duplicate">Duplicate charge/order</option>
+                <option value="fraudulent">Fraudulent</option>
+              </select>
+              <label className="flex items-center gap-2 text-sm text-neutral-700">
+                <input
+                  type="checkbox"
+                  checked={refundRestock}
+                  onChange={(event) => setRefundRestock(event.target.checked)}
+                  disabled={row.status === "shipped" || row.status === "stock_conflict"}
+                />
+                <span>Restock order items</span>
+              </label>
+              <textarea
+                value={refundNote}
+                onChange={(event) => setRefundNote(event.target.value)}
+                className="min-h-20 border border-neutral-300 p-2 text-sm"
+                placeholder="Refund/cancellation note"
               />
-              <span>Restock order items</span>
-            </label>
-            <textarea
-              value={refundNote}
-              onChange={(event) => setRefundNote(event.target.value)}
-              className="min-h-20 border border-neutral-300 p-2 text-sm"
-              placeholder="Refund/cancellation note"
-            />
-            <button
-              disabled={refunding}
-              className="h-10 border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 disabled:opacity-50"
-            >
-              {refunding ? "Refunding..." : "Refund in Stripe"}
-            </button>
-          </form>
+              <label className="grid gap-1">
+                <span className="text-[11px] uppercase tracking-[0.12em] text-neutral-500">
+                  Type order ID to confirm
+                </span>
+                <input
+                  value={refundOrderIdConfirm}
+                  onChange={(event) => setRefundOrderIdConfirm(event.target.value)}
+                  className="h-10 border border-neutral-300 px-3 text-sm"
+                  placeholder={row.id}
+                  autoComplete="off"
+                />
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRefundStep("locked");
+                    setRefundOrderIdConfirm("");
+                  }}
+                  className="h-10 border border-neutral-300 px-3 text-sm font-semibold hover:bg-neutral-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  disabled={refunding || !refundConfirmationMatches}
+                  className="h-10 border border-red-300 px-3 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                >
+                  {refunding ? "Refunding..." : "Confirm Refund in Stripe"}
+                </button>
+              </div>
+            </form>
+          )}
         </details>
       ) : null}
 
@@ -1585,7 +1676,7 @@ function OrderCard({
                   type="button"
                   disabled={autoFulfilling || missingShippingAddress}
                   onClick={autoFulfillOrder}
-                  className="h-10 w-full border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 disabled:opacity-50"
+                  className={`h-10 w-full text-sm font-semibold ${primaryActionButtonClass}`}
                 >
                   {autoFulfilling ? "Buying label..." : "Auto Fulfill (buy label + print)"}
                 </button>
@@ -1643,7 +1734,7 @@ function OrderCard({
             />
             <button
               disabled={sending || missingShippingAddress}
-              className="h-10 border border-neutral-300 text-sm font-semibold hover:bg-neutral-50 md:col-span-4 disabled:opacity-50"
+              className={`h-10 text-sm font-semibold md:col-span-4 ${primaryActionButtonClass}`}
             >
               {sending ? "Sending..." : "Mark shipped + email"}
             </button>
@@ -1657,6 +1748,8 @@ function OrderCard({
           {error ? <p className="text-xs text-red-600">{error}</p> : null}
         </>
       )}
+        </div>
+      </details>
     </div>
   );
 }

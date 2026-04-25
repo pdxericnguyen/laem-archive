@@ -4,7 +4,7 @@ import type { ReservationHoldSummary } from "@/lib/inventory";
 import type { OrderRecord } from "@/lib/orders";
 import type { Product } from "@/lib/store";
 
-export type ReconciliationStripePayment = {
+export type DevDiagnosticsStripePayment = {
   id: string;
   channel: "checkout" | "terminal";
   created: number;
@@ -13,13 +13,13 @@ export type ReconciliationStripePayment = {
   dashboardUrl: string;
 };
 
-export type ReconciliationProductState = Pick<Product, "slug" | "title" | "published" | "archived"> & {
+export type DevDiagnosticsProductState = Pick<Product, "slug" | "title" | "published" | "archived"> & {
   hasInventoryItemId: boolean;
   stockKey: number;
   holdSummary: ReservationHoldSummary;
 };
 
-export type ReconciliationIssue = {
+export type DevDiagnosticsIssue = {
   id: string;
   severity: "high" | "medium" | "low";
   label: string;
@@ -27,16 +27,16 @@ export type ReconciliationIssue = {
   href?: string;
 };
 
-export type ReconciliationSummary = {
+export type DevDiagnosticsSummary = {
   ordersChecked: number;
   stripePaymentsChecked: number;
   activeHoldCount: number;
   activeHeldUnits: number;
-  missingOrderPayments: ReconciliationStripePayment[];
+  missingOrderPayments: DevDiagnosticsStripePayment[];
   stockConflicts: OrderRecord[];
-  missingInventoryIdentities: ReconciliationProductState[];
-  lowStockProducts: ReconciliationProductState[];
-  issues: ReconciliationIssue[];
+  missingInventoryIdentities: DevDiagnosticsProductState[];
+  lowStockProducts: DevDiagnosticsProductState[];
+  issues: DevDiagnosticsIssue[];
 };
 
 function getStripeDashboardUrl(
@@ -77,7 +77,7 @@ export async function listRecentStripePayments(options: {
     })
   ]);
 
-  const checkoutRows: ReconciliationStripePayment[] = sessions.data
+  const checkoutRows: DevDiagnosticsStripePayment[] = sessions.data
     .filter((session) => session.payment_status === "paid")
     .map((session) => ({
       id: session.id,
@@ -88,7 +88,7 @@ export async function listRecentStripePayments(options: {
       dashboardUrl: getStripeDashboardUrl(session.id, "checkout_session", options.secretKey)
     }));
 
-  const terminalRows: ReconciliationStripePayment[] = paymentIntents.data
+  const terminalRows: DevDiagnosticsStripePayment[] = paymentIntents.data
     .filter(
       (paymentIntent) =>
         paymentIntent.status === "succeeded" &&
@@ -106,12 +106,12 @@ export async function listRecentStripePayments(options: {
   return [...checkoutRows, ...terminalRows].sort((a, b) => b.created - a.created);
 }
 
-export function buildReconciliationSummary(input: {
+export function buildDevDiagnosticsSummary(input: {
   orders: OrderRecord[];
-  stripePayments: ReconciliationStripePayment[];
-  products: ReconciliationProductState[];
+  stripePayments: DevDiagnosticsStripePayment[];
+  products: DevDiagnosticsProductState[];
   lowStockThreshold: number;
-}): ReconciliationSummary {
+}): DevDiagnosticsSummary {
   const orderIds = new Set(input.orders.map((order) => order.id));
   const missingOrderPayments = input.stripePayments.filter((payment) => !orderIds.has(payment.id));
   const stockConflicts = input.orders.filter((order) => order.status === "stock_conflict");
@@ -132,7 +132,7 @@ export function buildReconciliationSummary(input: {
     0
   );
 
-  const issues: ReconciliationIssue[] = [
+  const issues: DevDiagnosticsIssue[] = [
     ...missingOrderPayments.map((payment) => ({
       id: `missing-order-${payment.id}`,
       severity: "high" as const,
@@ -152,7 +152,7 @@ export function buildReconciliationSummary(input: {
       severity: "medium" as const,
       label: "Legacy product missing inventory identity",
       detail: `${product.slug} does not have an inventoryItemId. This is mostly a migration cleanup check for older products.`,
-      href: `/admin/reconciliation?slug=${encodeURIComponent(product.slug)}`
+      href: `/admin/dev-diagnostics?slug=${encodeURIComponent(product.slug)}`
     }))
   ];
 

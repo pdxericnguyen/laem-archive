@@ -569,7 +569,7 @@ export async function summarizeReservationHoldsForSlugs(
     await Promise.all(uniqueSlugs.map((slug) => kv.set(key.reserved(slug), summaries[slug]?.reservedStock || 0)));
     return summaries;
   } catch (error) {
-    console.error("Reserved stock reconciliation failed", {
+    console.error("Reserved stock hold refresh failed", {
       error,
       slugs: uniqueSlugs
     });
@@ -587,7 +587,7 @@ export async function summarizeReservationHoldsForSlugs(
   }
 }
 
-export async function reconcileReservedStockForSlugs(
+export async function refreshReservedStockForSlugs(
   slugs: string[]
 ): Promise<Record<string, number>> {
   const summaries = await summarizeReservationHoldsForSlugs(slugs);

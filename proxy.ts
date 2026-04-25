@@ -37,7 +37,12 @@ export async function proxy(request: NextRequest) {
   }
 
   const token = request.cookies.get(ADMIN_SESSION_COOKIE)?.value ?? null;
-  const isValid = await verifyAdminSessionToken(token);
+  let isValid = false;
+  try {
+    isValid = await verifyAdminSessionToken(token);
+  } catch {
+    isValid = false;
+  }
 
   if (pathname === "/admin/login") {
     if (isValid) {
