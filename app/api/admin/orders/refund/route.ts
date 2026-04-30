@@ -15,12 +15,14 @@ import {
 import { requireAdminOrThrow } from "@/lib/require-admin";
 
 export const runtime = "nodejs";
+const REFUND_CONFIRMATION_TEXT = "refund";
 
 type RefundPayload = {
   orderId: string;
   restock: boolean;
   reason: "duplicate" | "fraudulent" | "requested_by_customer";
   note: string;
+  confirmAction: string;
 };
 
 function normalizeReason(value: unknown): RefundPayload["reason"] {
@@ -45,7 +47,8 @@ async function getPayload(request: Request): Promise<RefundPayload | null> {
       orderId,
       restock: Boolean(body.restock),
       reason: normalizeReason(body.reason),
-      note: typeof body.note === "string" ? body.note.trim().slice(0, 1200) : ""
+      note: typeof body.note === "string" ? body.note.trim().slice(0, 1200) : "",
+      confirmAction: typeof body.confirmAction === "string" ? body.confirmAction.trim().toLowerCase() : ""
     };
   }
 
@@ -58,7 +61,8 @@ async function getPayload(request: Request): Promise<RefundPayload | null> {
     orderId,
     restock: formData.get("restock") === "on",
     reason: normalizeReason(formData.get("reason")),
-    note: String(formData.get("note") || "").trim().slice(0, 1200)
+    note: String(formData.get("note") || "").trim().slice(0, 1200),
+    confirmAction: String(formData.get("confirmAction") || "").trim().toLowerCase()
   };
 }
 
@@ -142,6 +146,12 @@ export async function POST(request: Request) {
   const payload = await getPayload(request);
   if (!payload) {
     return NextResponse.json({ ok: false, error: "Invalid payload" }, { status: 400 });
+  }
+  if (payload.confirmAction !== REFUND_CONFIRMATION_TEXT) {
+    return NextResponse.json(
+      { ok: false, error: `Type "${REFUND_CONFIRMATION_TEXT}" to confirm refund.` },
+      { status: 400 }
+    );
   }
 
   const lock = await acquireOrderFulfillmentLock(payload.orderId);

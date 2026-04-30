@@ -121,6 +121,7 @@ const QUEUE_PRESETS: Array<{ id: QueueFilter; label: string }> = [
 
 const primaryActionButtonClass =
   "border border-silver-border bg-silver text-silver-text transition-colors hover:bg-silver-hover active:bg-silver-active disabled:bg-silver-disabled disabled:text-neutral-500 disabled:cursor-not-allowed";
+const REFUND_CONFIRMATION_TEXT = "refund";
 
 function parseFiltersFromUrl() {
   if (typeof window === "undefined") {
@@ -716,7 +717,7 @@ function OrderCard({
   const [newNoteKind, setNewNoteKind] = useState<"internal" | "follow_up">("internal");
   const [refundNote, setRefundNote] = useState("");
   const [refundStep, setRefundStep] = useState<"locked" | "ready">("locked");
-  const [refundOrderIdConfirm, setRefundOrderIdConfirm] = useState("");
+  const [refundConfirmText, setRefundConfirmText] = useState("");
   const [refundReason, setRefundReason] = useState<"requested_by_customer" | "duplicate" | "fraudulent">(
     "requested_by_customer"
   );
@@ -743,7 +744,7 @@ function OrderCard({
     row.printing?.shippingLabel?.status === "disabled";
   const workspaceInitiallyOpen =
     row.status === "stock_conflict" || (row.status === "paid" && missingShippingAddress);
-  const refundConfirmationMatches = refundOrderIdConfirm.trim() === row.id;
+  const refundConfirmationMatches = refundConfirmText.trim().toLowerCase() === REFUND_CONFIRMATION_TEXT;
 
   useEffect(() => {
     setRefundRestock(row.status !== "shipped" && row.status !== "stock_conflict" && refundRestockDefault);
@@ -751,7 +752,7 @@ function OrderCard({
 
   useEffect(() => {
     setRefundStep("locked");
-    setRefundOrderIdConfirm("");
+    setRefundConfirmText("");
   }, [row.id]);
 
   async function copyText(value: string, label: string) {
@@ -1070,7 +1071,7 @@ function OrderCard({
   async function refundOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (refundStep !== "ready" || !refundConfirmationMatches) {
-      setError("Type the full order ID to confirm refund.");
+      setError(`Type "${REFUND_CONFIRMATION_TEXT}" to confirm refund.`);
       return;
     }
 
@@ -1086,7 +1087,8 @@ function OrderCard({
           orderId: row.id,
           restock: refundRestock,
           reason: refundReason,
-          note: refundNote
+          note: refundNote,
+          confirmAction: refundConfirmText
         })
       });
       const data = await response.json().catch(() => null);
@@ -1101,7 +1103,7 @@ function OrderCard({
           : "Order refunded.";
       setSuccess(msg);
       setRefundStep("locked");
-      setRefundOrderIdConfirm("");
+      setRefundConfirmText("");
       await onResolved(msg);
     } catch {
       setError("Refund failed.");
@@ -1529,13 +1531,13 @@ function OrderCard({
               />
               <label className="grid gap-1">
                 <span className="text-[11px] uppercase tracking-[0.12em] text-neutral-500">
-                  Type order ID to confirm
+                  Type refund to confirm
                 </span>
                 <input
-                  value={refundOrderIdConfirm}
-                  onChange={(event) => setRefundOrderIdConfirm(event.target.value)}
+                  value={refundConfirmText}
+                  onChange={(event) => setRefundConfirmText(event.target.value)}
                   className="h-10 border border-neutral-300 px-3 text-sm"
-                  placeholder={row.id}
+                  placeholder={REFUND_CONFIRMATION_TEXT}
                   autoComplete="off"
                 />
               </label>
@@ -1544,7 +1546,7 @@ function OrderCard({
                   type="button"
                   onClick={() => {
                     setRefundStep("locked");
-                    setRefundOrderIdConfirm("");
+                    setRefundConfirmText("");
                   }}
                   className="h-10 border border-neutral-300 px-3 text-sm font-semibold hover:bg-neutral-50"
                 >
