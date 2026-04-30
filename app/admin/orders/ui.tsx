@@ -104,13 +104,6 @@ type InlineNotice = {
   text: string;
 };
 
-type TimelineEvent = {
-  id: string;
-  label: string;
-  at?: number | null;
-  detail?: string;
-};
-
 const DEFAULT_FILTERS: Filters = {
   status: "all",
   queue: "all",
@@ -249,86 +242,6 @@ function toPrintBadge(status?: "queued" | "sent" | "failed" | "disabled") {
     return "border-neutral-300 bg-neutral-100 text-neutral-700";
   }
   return "border-amber-300 bg-amber-50 text-amber-800";
-}
-
-function buildTimeline(row: OrderRow): TimelineEvent[] {
-  const timeline: TimelineEvent[] = [
-    {
-      id: "created",
-      label: "Order created",
-      at: row.created
-    }
-  ];
-
-  if (row.shippingAddress?.line1) {
-    timeline.push({
-      id: "address",
-      label: "Shipping address captured",
-      at: row.created
-    });
-  }
-
-  if (row.printing?.packingSlip?.updatedAt) {
-    timeline.push({
-      id: "packing-slip",
-      label: `Packing slip print: ${row.printing.packingSlip.status || "updated"}`,
-      at: row.printing.packingSlip.updatedAt,
-      detail: row.printing.packingSlip.error || undefined
-    });
-  }
-
-  if (row.fulfillment?.purchasedAt) {
-    timeline.push({
-      id: "label-purchased",
-      label: "Shipping label purchased",
-      at: row.fulfillment.purchasedAt
-    });
-  }
-
-  if (row.printing?.shippingLabel?.updatedAt) {
-    timeline.push({
-      id: "label-print",
-      label: `Shipping label print: ${row.printing.shippingLabel.status || "updated"}`,
-      at: row.printing.shippingLabel.updatedAt,
-      detail: row.printing.shippingLabel.error || undefined
-    });
-  }
-
-  if (row.shipping?.shippedAt) {
-    timeline.push({
-      id: "shipped",
-      label: "Marked shipped",
-      at: row.shipping.shippedAt
-    });
-  }
-
-  if (row.conflictResolution?.resolvedAt) {
-    timeline.push({
-      id: "conflict-resolved",
-      label: "Conflict resolved",
-      at: row.conflictResolution.resolvedAt,
-      detail: row.conflictResolution.note || undefined
-    });
-  }
-
-  if (row.refund?.refundedAt) {
-    timeline.push({
-      id: "refunded",
-      label: "Refunded / canceled",
-      at: row.refund.refundedAt,
-      detail: row.refund.note || row.refund.reason || undefined
-    });
-  }
-
-  if (row.piiRedactedAt) {
-    timeline.push({
-      id: "pii-redacted",
-      label: `Customer data redacted (${row.piiRedactionReason || "manual"})`,
-      at: row.piiRedactedAt
-    });
-  }
-
-  return timeline.sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
 }
 
 export default function OrdersClient() {
@@ -816,7 +729,6 @@ function OrderCard({
   const requiresShippingAddress = row.channel !== "terminal";
   const canAutoFulfill = row.channel !== "terminal";
   const missingShippingAddress = requiresShippingAddress && !shipToAddress;
-  const timeline = buildTimeline(row);
   const terminalOrderState =
     row.status === "shipped" || row.status === "refunded" || row.status === "canceled";
   const canRefund =
@@ -1251,7 +1163,7 @@ function OrderCard({
 
       <details className="border border-neutral-200 p-2" open={workspaceInitiallyOpen || undefined}>
         <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-neutral-600">
-          Order Workspace
+          Actions
         </summary>
         <div className="mt-3 space-y-3">
       <div className="flex flex-wrap gap-2">
@@ -1473,23 +1385,6 @@ function OrderCard({
             </div>
           ) : null}
         </div>
-      ) : null}
-
-      {timeline.length > 1 ? (
-        <details className="border border-neutral-200 p-2 text-xs text-neutral-700">
-          <summary className="cursor-pointer font-semibold uppercase tracking-[0.12em] text-neutral-500">
-            Activity ({timeline.length})
-          </summary>
-          <ul className="mt-2 space-y-1">
-            {timeline.map((event) => (
-              <li key={event.id}>
-                <span className="font-semibold">{event.label}</span>
-                {event.at ? ` - ${formatDate(event.at)}` : ""}
-                {event.detail ? ` (${event.detail})` : ""}
-              </li>
-            ))}
-          </ul>
-        </details>
       ) : null}
 
       <details className="border border-neutral-200 p-2 text-xs text-neutral-700">

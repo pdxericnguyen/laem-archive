@@ -1,9 +1,4 @@
 import { getStock, summarizeReservationHoldsForSlugs, type ReservationHoldSummary } from "@/lib/inventory";
-import {
-  describeInventoryLedgerEvent,
-  listInventoryLedgerEvents,
-  type InventoryLedgerEvent
-} from "@/lib/inventory-ledger";
 import { getAdminFilterCountClass, getAdminFilterTabClass } from "@/lib/admin-ui";
 import { hasKvEnv, kv } from "@/lib/kv";
 import type { Product, ProductCategory } from "@/lib/store";
@@ -68,7 +63,6 @@ type ProductRow = {
   product: Product;
   stock: number;
   holdSummary: ReservationHoldSummary;
-  inventoryEvents: InventoryLedgerEvent[];
 };
 
 function formatPriceInput(priceCents: number) {
@@ -209,26 +203,6 @@ function describeHoldWindow(holdSummary: ReservationHoldSummary, nowMs: number) 
   }
 
   return `Hold expires ${deadline} (${remaining} left).`;
-}
-
-function formatInventoryEventDate(unix: number) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(new Date(unix * 1000));
-}
-
-function describeInventoryEventChange(event: InventoryLedgerEvent) {
-  const parts: string[] = [];
-  if (typeof event.stockBefore === "number" || typeof event.stockAfter === "number") {
-    parts.push(`Stock ${event.stockBefore ?? "-"} to ${event.stockAfter ?? "-"}`);
-  }
-  if (typeof event.reservedBefore === "number" || typeof event.reservedAfter === "number") {
-    parts.push(`Held ${event.reservedBefore ?? "-"} to ${event.reservedAfter ?? "-"}`);
-  }
-  return parts.join(" | ");
 }
 
 function getCategoryLabel(category: ProductCategoryFilter) {
@@ -428,25 +402,18 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
   }
 
   const products = await getProducts();
-  const [holdSummariesBySlug, stockRows, recentInventoryEvents] = await Promise.all([
+  const [holdSummariesBySlug, stockRows] = await Promise.all([
     summarizeReservationHoldsForSlugs(products.map((product) => product.slug)),
-    Promise.all(products.map(async (product) => [product.slug, await getStock(product.slug)] as const)),
-    listInventoryLedgerEvents({ limit: 200 })
+    Promise.all(products.map(async (product) => [product.slug, await getStock(product.slug)] as const))
   ]);
   const stockBySlug = Object.fromEntries(stockRows);
-  const inventoryEventsBySlug = recentInventoryEvents.reduce<Record<string, InventoryLedgerEvent[]>>((groups, event) => {
-    groups[event.slug] = groups[event.slug] || [];
-    groups[event.slug].push(event);
-    return groups;
-  }, {});
   const productRows: ProductRow[] = products.map((product) => ({
     product,
     stock: stockBySlug[product.slug] || 0,
     holdSummary: holdSummariesBySlug[product.slug] || {
       reservedStock: 0,
       activeCheckoutCount: 0
-    },
-    inventoryEvents: (inventoryEventsBySlug[product.slug] || []).slice(0, 5)
+    }
   }));
   const resolvedSearchParams = (await searchParams) || {};
   const nowMs = Date.now();
@@ -776,7 +743,7 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                 : `No ${activeFilterLabel.toLowerCase()} products yet.`}
           </div>
         ) : (
-          filteredRows.map(({ product, stock, holdSummary, inventoryEvents }) => {
+          filteredRows.map(({ product, stock, holdSummary }) => {
             const statusBadge = getProductStatusBadge(product, stock);
             const productStatus = getProductStatus(product);
             const slugLocked = productStatus === "live";
@@ -1045,48 +1012,6 @@ export default async function AdminProductsPage({ searchParams }: AdminProductsP
                   Update Product
                 </button>
               </form>
-              <div className="border border-neutral-200 p-3 text-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-600">
-                    Inventory History
-                  </h3>
-                  {holdSummary.reservedStock > 0 ? (
-                    <span className="border border-amber-300 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800">
-                      {holdSummary.reservedStock} held
-                    </span>
-                  ) : null}
-                </div>
-                {inventoryEvents.length === 0 ? (
-                  <p className="mt-2 text-xs text-neutral-500">
-                    No stock movement recorded yet.
-                  </p>
-                ) : (
-                  <ul className="mt-2 divide-y divide-neutral-100">
-                    {inventoryEvents.map((event) => {
-                      const change = describeInventoryEventChange(event);
-                      return (
-                        <li key={event.id} className="py-2 first:pt-0 last:pb-0">
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="font-semibold text-neutral-800">
-                              {describeInventoryLedgerEvent(event)}
-                            </span>
-                            <span className="text-xs text-neutral-500">
-                              {formatInventoryEventDate(event.createdAt)}
-                            </span>
-                          </div>
-                          {change ? <p className="mt-1 text-xs text-neutral-600">{change}</p> : null}
-                          {event.referenceId ? (
-                            <p className="mt-1 truncate text-xs text-neutral-500">
-                              Ref <code>{event.referenceId}</code>
-                            </p>
-                          ) : null}
-                          {event.note ? <p className="mt-1 text-xs text-neutral-500">{event.note}</p> : null}
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
-              </div>
               <form action="/api/admin/products/delete" method="POST" className="border-t border-neutral-200 pt-4 grid gap-3 text-sm">
                 <input type="hidden" name="slug" value={product.slug} />
                 <input type="hidden" name="returnStatusFilter" value={activeFilter} />
