@@ -21,7 +21,7 @@
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LAEMAPIBaseURL</key>
-    <string>http://localhost:3000/</string>
+    <string>https://laemarchive.com/</string>
 	<key>LAEMTerminalCaptureMethod</key>
 	<string>automatic</string>
 	<key>LAEMTerminalDiscoveryTimeoutSeconds</key>

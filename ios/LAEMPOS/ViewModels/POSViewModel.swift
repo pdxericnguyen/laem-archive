@@ -27,7 +27,7 @@ final class POSViewModel: ObservableObject {
     private let apiClient: APIClient?
     private let terminalManager: LAEMTerminalManager
     private let userDefaults: UserDefaults
-    private var quantitiesBySlug: [String: Int] = [:]
+    @Published private var quantitiesBySlug: [String: Int] = [:]
     private static let cachedProductsKey = "laem.pos.cached-products"
 
     init(apiClient: APIClient?, terminalManager: LAEMTerminalManager, userDefaults: UserDefaults = .standard) {
