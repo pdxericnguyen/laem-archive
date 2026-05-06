@@ -8,7 +8,7 @@ export type OrderQueueFilter =
   | "address_missing"
   | "print_failed"
   | "conflicts";
-export type OrderChannel = "checkout" | "terminal";
+export type OrderChannel = "checkout" | "terminal" | "cash";
 export type StripeObjectType = "checkout_session" | "payment_intent";
 export type OrderPiiRedactionReason = "retention" | "manual";
 
@@ -270,6 +270,9 @@ function normalizeStatus(value: unknown): OrderStatus {
 }
 
 function normalizeChannel(value: unknown, id: string): OrderChannel {
+  if (value === "cash" || id.startsWith("cash_")) {
+    return "cash";
+  }
   if (value === "terminal" || id.startsWith("pi_")) {
     return "terminal";
   }
@@ -280,7 +283,10 @@ function normalizeStripeObjectType(
   value: unknown,
   id: string,
   channel: OrderChannel
-): StripeObjectType {
+): StripeObjectType | undefined {
+  if (channel === "cash") {
+    return undefined;
+  }
   if (value === "payment_intent" || value === "checkout_session") {
     return value;
   }
@@ -809,14 +815,19 @@ function matchesFilters(
   if (status !== "all" && row.status !== status) {
     return false;
   }
-  if (queue === "paid_unfulfilled" && row.status !== "paid") {
-    return false;
+  if (queue === "paid_unfulfilled") {
+    if (row.status !== "paid") {
+      return false;
+    }
+    if (row.channel === "terminal" || row.channel === "cash") {
+      return false;
+    }
   }
   if (queue === "address_missing") {
     if (row.status !== "paid") {
       return false;
     }
-    if (row.channel === "terminal") {
+    if (row.channel === "terminal" || row.channel === "cash") {
       return false;
     }
     if (row.shippingAddress?.line1) {

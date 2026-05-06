@@ -344,7 +344,7 @@ async function recordReservationCreatedEvents(
       return recordInventoryLedgerEvent({
         slug: request.slug,
         kind: "reservation_created",
-        source: sessionId.startsWith("pi_") ? "terminal" : "checkout",
+        source: sessionId.startsWith("cash_") ? "cash" : sessionId.startsWith("pi_") ? "terminal" : "checkout",
         referenceId: sessionId,
         quantity: request.quantity,
         reservedBefore: Math.max(0, reservedAfter - request.quantity),
@@ -367,7 +367,7 @@ async function recordReservationReleasedEvents(
       return recordInventoryLedgerEvent({
         slug: item.slug,
         kind: nextStatus === "expired" ? "reservation_expired" : "reservation_released",
-        source: sessionId.startsWith("pi_") ? "terminal" : "checkout",
+        source: sessionId.startsWith("cash_") ? "cash" : sessionId.startsWith("pi_") ? "terminal" : "checkout",
         referenceId: sessionId,
         quantity: item.quantity,
         reservedBefore: reservedAfter + item.quantity,
@@ -388,7 +388,7 @@ async function recordReservationCompletedEvents(
       return recordInventoryLedgerEvent({
         slug: item.slug,
         kind: "reservation_completed",
-        source: sessionId.startsWith("pi_") ? "terminal" : "checkout",
+        source: sessionId.startsWith("cash_") ? "cash" : sessionId.startsWith("pi_") ? "terminal" : "checkout",
         referenceId: sessionId,
         quantity: item.quantity,
         reservedBefore: reservedAfter + item.quantity,

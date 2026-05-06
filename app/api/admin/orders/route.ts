@@ -9,6 +9,9 @@ function getStripeDashboardUrl(
   stripeObjectType: StripeObjectType | undefined,
   secretKey: string | undefined
 ) {
+  if (!stripeObjectType || objectId.startsWith("cash_")) {
+    return null;
+  }
   const isTest = Boolean(secretKey && secretKey.startsWith("sk_test_"));
   const base = isTest ? "https://dashboard.stripe.com/test" : "https://dashboard.stripe.com";
   if (stripeObjectType === "payment_intent" || objectId.startsWith("pi_")) {

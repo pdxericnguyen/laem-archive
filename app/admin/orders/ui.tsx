@@ -15,7 +15,7 @@ type QueueFilter = "all" | "paid_unfulfilled" | "address_missing" | "print_faile
 
 type OrderRow = {
   id: string;
-  channel?: "checkout" | "terminal" | string;
+  channel?: "checkout" | "terminal" | "cash" | string;
   slug?: string | null;
   items?: Array<{ slug?: string; quantity?: number }>;
   email?: string | null;
@@ -24,7 +24,7 @@ type OrderRow = {
   amount_total?: number | null;
   currency?: string | null;
   status?: OrderStatus;
-  stripe_dashboard_url?: string;
+  stripe_dashboard_url?: string | null;
   shippingAddress?: {
     name?: string | null;
     phone?: string | null;
@@ -727,16 +727,17 @@ function OrderCard({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const shipToAddress = formatAddress(row);
-  const requiresShippingAddress = row.channel !== "terminal";
-  const canAutoFulfill = row.channel !== "terminal";
+  const requiresShippingAddress = row.channel === "checkout" || !row.channel;
+  const canAutoFulfill = row.channel === "checkout" || !row.channel;
   const missingShippingAddress = requiresShippingAddress && !shipToAddress;
   const terminalOrderState =
     row.status === "shipped" || row.status === "refunded" || row.status === "canceled";
   const canRefund =
-    row.status === "paid" ||
-    row.status === "stock_conflict" ||
-    row.status === "conflict_resolved" ||
-    row.status === "shipped";
+    row.channel !== "cash" &&
+    (row.status === "paid" ||
+      row.status === "stock_conflict" ||
+      row.status === "conflict_resolved" ||
+      row.status === "shipped");
   const hasPrintIssue =
     row.printing?.packingSlip?.status === "failed" ||
     row.printing?.packingSlip?.status === "disabled" ||
@@ -1212,7 +1213,11 @@ function OrderCard({
             onClick={() => resendEmail("order_received")}
             disabled={Boolean(resendingEmail)}
           >
-            {resendingEmail === "order_received" ? "Resending..." : "Resend Order Email"}
+            {resendingEmail === "order_received"
+              ? "Resending..."
+              : row.channel === "cash"
+                ? "Resend Receipt"
+                : "Resend Order Email"}
           </button>
         ) : null}
         {row.email && row.shipping ? (
@@ -1236,7 +1241,7 @@ function OrderCard({
         <div className="text-xs text-neutral-500">Customer address was redacted from this record.</div>
       ) : null}
 
-      {row.channel !== "terminal" && !row.piiRedactedAt && !terminalOrderState ? (
+      {(row.channel === "checkout" || !row.channel) && !row.piiRedactedAt && !terminalOrderState ? (
         <details className="border border-neutral-200 p-2">
           <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.12em] text-neutral-600">
             Edit Address

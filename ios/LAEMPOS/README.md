@@ -12,6 +12,7 @@ This folder contains a minimal staff-only iOS POS scaffold for LAEM.
 - Internet discovery and connect flow scaffolding for Stripe Reader S700/S710 style readers
 - Last-reader preference and automatic reconnect attempt during discovery
 - Backend-created Terminal PaymentIntents so price, stock reservation, and order metadata come from LAEM
+- Cash checkout that records an online order, decrements stock, and can send a LAEM receipt email
 - Basic disconnect, reconnect, low-battery, and duplicate-operation handling
 - Offline queue status surfaced in the app; payment creation still requires backend reachability before collection
 

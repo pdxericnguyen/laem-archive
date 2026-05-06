@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { inventoryAlertText, orderReceivedText, shippedText } from "@/lib/emailTemplates";
+import { cashReceiptText, inventoryAlertText, orderReceivedText, shippedText } from "@/lib/emailTemplates";
 
 function getResend() {
   const resendApiKey = process.env.RESEND_API_KEY;
@@ -32,6 +32,13 @@ export type ShippingEmailPayload = {
   trackingUrl: string;
 };
 
+export type CashReceiptEmailPayload = {
+  orderId: string;
+  customerEmail: string;
+  amountTotal: number | null;
+  currency: string | null;
+};
+
 export type InventoryAlertPayload = {
   kind: "low" | "zero" | "oversell";
   slug: string;
@@ -62,6 +69,16 @@ export async function sendShippedEmail(payload: ShippingEmailPayload) {
       trackingNumber: payload.trackingNumber,
       trackingUrl: payload.trackingUrl
     })
+  });
+}
+
+export async function sendCashReceiptEmail(payload: CashReceiptEmailPayload) {
+  const resend = getResend();
+  await resend.emails.send({
+    from: getEmailFrom(),
+    to: payload.customerEmail,
+    subject: "LAEM Archive receipt",
+    text: cashReceiptText(payload)
   });
 }
 

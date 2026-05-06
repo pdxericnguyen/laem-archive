@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { recordAdminAuditEvent } from "@/lib/admin-audit";
-import { sendOrderReceivedEmail, sendShippedEmail } from "@/lib/email";
+import { sendCashReceiptEmail, sendOrderReceivedEmail, sendShippedEmail } from "@/lib/email";
 import { getProduct } from "@/lib/inventory";
 import { readOrder } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
@@ -70,6 +70,26 @@ export async function POST(request: Request) {
       trackingUrl: order.shipping.trackingUrl
     });
   } else {
+    if (order.channel === "cash") {
+      await sendCashReceiptEmail({
+        orderId: order.id,
+        customerEmail: order.email,
+        amountTotal: order.amount_total,
+        currency: order.currency
+      });
+      await recordAdminAuditEvent({
+        action: "order_email_resent",
+        entity: "order",
+        entityId: order.id,
+        summary: "Cash receipt email resent",
+        details: {
+          kind: "cash_receipt",
+          customerEmail: order.email
+        }
+      });
+      return NextResponse.json({ ok: true });
+    }
+
     const primarySlug = order.items?.[0]?.slug || order.slug;
     const firstProduct = primarySlug ? await getProduct(primarySlug) : null;
     await sendOrderReceivedEmail({

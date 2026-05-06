@@ -2,7 +2,7 @@ import SwiftUI
 
 struct OrderResultView: View {
     let result: CheckoutResult
-    let onSendReceipt: @MainActor (String, String) async throws -> Void
+    let onSendReceipt: @MainActor (String, ReceiptReferenceKind, String) async throws -> Void
 
     @State private var receiptEmail = ""
     @State private var isSendingReceipt = false
@@ -30,17 +30,20 @@ struct OrderResultView: View {
 
     private var shouldShowReceiptInput: Bool {
         switch result {
-        case let .success(_, _, storedOffline, paymentIntentId):
-            return !storedOffline && paymentIntentId != nil
+        case let .success(_, _, storedOffline, receiptReferenceId, _):
+            return !storedOffline && receiptReferenceId != nil
         case .failure:
             return false
         }
     }
 
-    private var receiptPaymentIntentId: String? {
+    private var receiptReference: (id: String, kind: ReceiptReferenceKind)? {
         switch result {
-        case let .success(_, _, _, paymentIntentId):
-            return paymentIntentId
+        case let .success(_, _, _, receiptReferenceId, receiptKind):
+            guard let receiptReferenceId else {
+                return nil
+            }
+            return (receiptReferenceId, receiptKind)
         case .failure:
             return nil
         }
@@ -154,8 +157,8 @@ struct OrderResultView: View {
             return
         }
 
-        guard let paymentIntentId = receiptPaymentIntentId else {
-            receiptErrorMessage = "Missing Stripe payment intent reference."
+        guard let receiptReference else {
+            receiptErrorMessage = "Missing receipt reference."
             receiptStatusMessage = nil
             return
         }
@@ -173,7 +176,7 @@ struct OrderResultView: View {
 
         Task {
             do {
-                try await onSendReceipt(paymentIntentId, normalizedEmail)
+                try await onSendReceipt(receiptReference.id, receiptReference.kind, normalizedEmail)
                 await MainActor.run {
                     isSendingReceipt = false
                     receiptEmail = normalizedEmail

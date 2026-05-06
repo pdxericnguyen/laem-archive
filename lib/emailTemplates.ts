@@ -33,6 +33,35 @@ export function shippedText(args: {
   ].join("\n");
 }
 
+export function cashReceiptText(args: {
+  orderId: string;
+  amountTotal: number | null;
+  currency: string | null;
+}) {
+  const currency = (args.currency || "usd").toUpperCase();
+  const total =
+    typeof args.amountTotal === "number"
+      ? new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency
+        }).format(args.amountTotal / 100)
+      : null;
+
+  const lines = [
+    "Thanks for shopping LAEM Archive.",
+    "",
+    `Receipt: ${args.orderId}`,
+    "Payment: Cash"
+  ];
+
+  if (total) {
+    lines.push(`Total: ${total}`);
+  }
+
+  lines.push("", "Your cash payment has been received.", "", "- LAEM Archive");
+  return lines.join("\n");
+}
+
 export function inventoryAlertText(args: {
   kind: "low" | "zero" | "oversell";
   slug: string;

@@ -9,7 +9,7 @@ export type InventoryLedgerKind =
   | "stock_adjusted"
   | "stock_conflict";
 
-export type InventoryLedgerSource = "checkout" | "terminal" | "admin" | "system";
+export type InventoryLedgerSource = "checkout" | "terminal" | "cash" | "admin" | "system";
 
 export type InventoryLedgerEvent = {
   id: string;
@@ -44,7 +44,7 @@ const VALID_KINDS = new Set<InventoryLedgerKind>([
   "stock_adjusted",
   "stock_conflict"
 ]);
-const VALID_SOURCES = new Set<InventoryLedgerSource>(["checkout", "terminal", "admin", "system"]);
+const VALID_SOURCES = new Set<InventoryLedgerSource>(["checkout", "terminal", "cash", "admin", "system"]);
 
 function generateLedgerId() {
   try {
@@ -177,7 +177,7 @@ export function describeInventoryLedgerEvent(event: InventoryLedgerEvent) {
     case "reservation_completed":
       return "Checkout hold completed";
     case "stock_sold":
-      return event.source === "terminal" ? "POS sale completed" : "Web sale completed";
+      return event.source === "terminal" || event.source === "cash" ? "POS sale completed" : "Web sale completed";
     case "stock_adjusted":
       return "Admin stock adjusted";
     case "stock_conflict":

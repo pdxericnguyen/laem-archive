@@ -54,6 +54,36 @@ struct SendTerminalReceiptPayload: Encodable {
     let email: String
 }
 
+struct CashSalePayload: Encodable {
+    struct Item: Encodable {
+        let slug: String
+        let quantity: Int
+    }
+
+    let items: [Item]
+    let clientSaleId: String
+}
+
+struct CashSaleResponse: Decodable {
+    let ok: Bool
+    let orderId: String
+    let amount: Int?
+    let currency: String?
+    let created: Int?
+    let alreadyRecorded: Bool?
+}
+
+struct SendCashReceiptPayload: Encodable {
+    let orderId: String
+    let email: String
+}
+
+struct SendCashReceiptResponse: Decodable {
+    let ok: Bool
+    let orderId: String
+    let receiptEmail: String
+}
+
 struct SendTerminalReceiptResponse: Decodable {
     let ok: Bool
     let paymentIntentId: String
@@ -226,9 +256,28 @@ final class APIClient: @unchecked Sendable {
         return try await send(request)
     }
 
+    func recordCashSale(lines: [CartLine], clientSaleId: String) async throws -> CashSaleResponse {
+        let payload = CashSalePayload(
+            items: lines.map { .init(slug: $0.product.slug, quantity: $0.quantity) },
+            clientSaleId: clientSaleId
+        )
+        var request = try makeRequest(path: "api/pos/cash-sale", method: "POST")
+        request.httpBody = try JSONEncoder().encode(payload)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        return try await send(request)
+    }
+
     func sendTerminalReceiptEmail(paymentIntentId: String, email: String) async throws -> SendTerminalReceiptResponse {
         let payload = SendTerminalReceiptPayload(paymentIntentId: paymentIntentId, email: email)
         var request = try makeRequest(path: "api/terminal/send-receipt", method: "POST")
+        request.httpBody = try JSONEncoder().encode(payload)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        return try await send(request)
+    }
+
+    func sendCashReceiptEmail(orderId: String, email: String) async throws -> SendCashReceiptResponse {
+        let payload = SendCashReceiptPayload(orderId: orderId, email: email)
+        var request = try makeRequest(path: "api/pos/cash-receipt", method: "POST")
         request.httpBody = try JSONEncoder().encode(payload)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return try await send(request)

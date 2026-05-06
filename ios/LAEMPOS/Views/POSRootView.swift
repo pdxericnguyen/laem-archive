@@ -145,8 +145,12 @@ struct POSRootView: View {
             ReaderSheetView(terminalManager: terminalManager)
         }
         .sheet(item: $viewModel.checkoutResult) { result in
-            OrderResultView(result: result) { paymentIntentId, email in
-                try await viewModel.sendReceiptEmail(paymentIntentId: paymentIntentId, email: email)
+            OrderResultView(result: result) { referenceId, referenceKind, email in
+                try await viewModel.sendReceiptEmail(
+                    referenceId: referenceId,
+                    referenceKind: referenceKind,
+                    email: email
+                )
             }
         }
         .background(POSBrand.pageBackground.ignoresSafeArea())
@@ -383,7 +387,26 @@ struct POSRootView: View {
                             }
                         }
                         .buttonStyle(POSPrimaryActionStyle())
-                        .disabled(viewModel.isCharging || viewModel.cartLines.isEmpty)
+                        .disabled(viewModel.isCharging || viewModel.isRecordingCashSale || viewModel.cartLines.isEmpty)
+
+                        Button {
+                            Task {
+                                await viewModel.recordCashSale()
+                            }
+                        } label: {
+                            if viewModel.isRecordingCashSale {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                            } else if viewModel.cartLines.isEmpty {
+                                Label("Add Items for Cash", systemImage: "banknote")
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Label("Record Cash \(viewModel.formattedTotal)", systemImage: "banknote")
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                        .buttonStyle(POSSecondaryActionStyle())
+                        .disabled(viewModel.isCharging || viewModel.isRecordingCashSale || viewModel.cartLines.isEmpty)
 
                         Button("Clear Cart", role: .destructive) {
                             viewModel.clearCart()

@@ -16,6 +16,7 @@ final class POSViewModel: ObservableObject {
     @Published private(set) var products: [Product] = []
     @Published private(set) var isLoadingProducts = false
     @Published private(set) var isCharging = false
+    @Published private(set) var isRecordingCashSale = false
     @Published private(set) var isAuthenticating = false
     @Published private(set) var isAuthenticated: Bool
     @Published var notice: Notice?
@@ -28,6 +29,8 @@ final class POSViewModel: ObservableObject {
     private let terminalManager: LAEMTerminalManager
     private let userDefaults: UserDefaults
     @Published private var quantitiesBySlug: [String: Int] = [:]
+    private var pendingCashSaleId: String?
+    private var pendingCashSaleSignature: String?
     private static let cachedProductsKey = "laem.pos.cached-products"
 
     init(apiClient: APIClient?, terminalManager: LAEMTerminalManager, userDefaults: UserDefaults = .standard) {
@@ -188,6 +191,8 @@ final class POSViewModel: ObservableObject {
 
     func clearCart() {
         quantitiesBySlug.removeAll()
+        pendingCashSaleId = nil
+        pendingCashSaleSignature = nil
     }
 
     func chargeCart() async {
@@ -239,7 +244,8 @@ final class POSViewModel: ObservableObject {
                 reference: terminalResult.reference,
                 amountText: amountText,
                 storedOffline: terminalResult.storedOffline,
-                paymentIntentId: terminalResult.stripePaymentIntentId
+                receiptReferenceId: terminalResult.stripePaymentIntentId,
+                receiptKind: .stripeTerminal
             )
             clearCart()
             let refreshError = await refreshProductsSilently()
@@ -264,7 +270,72 @@ final class POSViewModel: ObservableObject {
         }
     }
 
-    func sendReceiptEmail(paymentIntentId: String, email: String) async throws {
+    func recordCashSale() async {
+        guard !requiresAuthentication else {
+            authErrorMessage = "Sign in before recording a cash sale."
+            return
+        }
+
+        guard !cartLines.isEmpty else {
+            notice = Notice(style: .warning, message: "Add at least one product before recording cash.")
+            return
+        }
+
+        guard let apiClient else {
+            notice = Notice(
+                style: .error,
+                message: "Set LAEMAPIBaseURL before recording cash sales."
+            )
+            return
+        }
+
+        isRecordingCashSale = true
+        defer { isRecordingCashSale = false }
+
+        do {
+            let amountText = formattedTotal
+            let saleSignature = cashSaleSignature(for: cartLines)
+            let clientSaleId: String
+            if let pendingCashSaleId, pendingCashSaleSignature == saleSignature {
+                clientSaleId = pendingCashSaleId
+            } else {
+                clientSaleId = UUID().uuidString.lowercased()
+                pendingCashSaleId = clientSaleId
+                pendingCashSaleSignature = saleSignature
+            }
+            let result = try await apiClient.recordCashSale(lines: cartLines, clientSaleId: clientSaleId)
+
+            checkoutResult = .success(
+                reference: result.orderId,
+                amountText: amountText,
+                storedOffline: false,
+                receiptReferenceId: result.orderId,
+                receiptKind: .cashOrder
+            )
+            clearCart()
+            let refreshError = await refreshProductsSilently()
+            notice = Notice(
+                style: refreshError == nil ? .info : .warning,
+                message: refreshError.map {
+                    "Cash sale recorded, but the catalog could not refresh. \($0)"
+                } ?? "Cash sale recorded. Catalog refreshed."
+            )
+        } catch {
+            if let apiError = error as? APIClientError, apiError == .unauthorized {
+                handleUnauthorizedSession()
+                return
+            }
+            _ = await refreshProductsSilently()
+            checkoutResult = .failure(message: error.localizedDescription)
+            notice = Notice(style: .error, message: error.localizedDescription)
+        }
+    }
+
+    func sendReceiptEmail(
+        referenceId: String,
+        referenceKind: ReceiptReferenceKind,
+        email: String
+    ) async throws {
         guard !requiresAuthentication else {
             authErrorMessage = "Sign in before sending a receipt."
             throw APIClientError.unauthorized
@@ -279,10 +350,18 @@ final class POSViewModel: ObservableObject {
             throw APIClientError.server(message: "Set LAEMAPIBaseURL before sending receipts.")
         }
 
-        _ = try await apiClient.sendTerminalReceiptEmail(
-            paymentIntentId: paymentIntentId,
-            email: normalizedEmail
-        )
+        switch referenceKind {
+        case .stripeTerminal:
+            _ = try await apiClient.sendTerminalReceiptEmail(
+                paymentIntentId: referenceId,
+                email: normalizedEmail
+            )
+        case .cashOrder:
+            _ = try await apiClient.sendCashReceiptEmail(
+                orderId: referenceId,
+                email: normalizedEmail
+            )
+        }
         notice = Notice(
             style: .info,
             message: "Receipt email saved for \(normalizedEmail)."
@@ -325,6 +404,13 @@ final class POSViewModel: ObservableObject {
             return false
         }
         return value.contains("@") && value.contains(".")
+    }
+
+    private func cashSaleSignature(for lines: [CartLine]) -> String {
+        lines
+            .map { "\($0.product.slug):\($0.quantity)" }
+            .sorted()
+            .joined(separator: ",")
     }
 }
 

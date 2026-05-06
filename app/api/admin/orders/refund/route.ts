@@ -169,6 +169,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, already: true, refund: order.refund || null });
     }
 
+    if (order.channel === "cash") {
+      return NextResponse.json(
+        { ok: false, error: "Cash POS orders do not have a Stripe charge to refund." },
+        { status: 409 }
+      );
+    }
+
     if (payload.restock && order.status === "shipped") {
       return NextResponse.json(
         { ok: false, error: "Shipped orders can be refunded here, but restocking must be handled manually." },
