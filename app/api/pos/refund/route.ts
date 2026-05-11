@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
 import { recordAdminAuditEvent } from "@/lib/admin-audit";
-import { syncProductStockAndArchiveState } from "@/lib/inventory";
+import { getInventoryStockKeyForSlug, syncProductStockAndArchiveState } from "@/lib/inventory";
 import { recordInventoryLedgerEvent } from "@/lib/inventory-ledger";
-import { key, kv } from "@/lib/kv";
+import { kv } from "@/lib/kv";
 import {
   acquireOrderFulfillmentLock,
   readOrder,
@@ -91,7 +91,7 @@ function getRestockLineItems(order: OrderRecord): OrderLineItem[] {
 }
 
 function getRefundRestockMarkerKey(orderId: string, slug: string) {
-  return `order:refund-restock:${orderId}:${slug}`;
+  return `order:refund-restock:v2:${orderId}:${slug}`;
 }
 
 function parseRestockScriptResponse(response: unknown) {
@@ -127,10 +127,14 @@ return {1, previousStock, nextStock}
 `;
 
   for (const item of getRestockLineItems(order)) {
+    const stockKey = await getInventoryStockKeyForSlug(item.slug);
+    if (!stockKey) {
+      throw new Error(`Product ${item.slug} is missing inventory tracking.`);
+    }
     const markerKey = getRefundRestockMarkerKey(order.id, item.slug);
     const response = await kv.eval(
       script,
-      [key.stock(item.slug), markerKey],
+      [stockKey, markerKey],
       [String(item.quantity), "1"]
     );
     const result = parseRestockScriptResponse(response);
