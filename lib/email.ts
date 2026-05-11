@@ -1,5 +1,5 @@
 import { Resend } from "resend";
-import { cashReceiptText, inventoryAlertText, orderReceivedText, shippedText } from "@/lib/emailTemplates";
+import { cashReceiptHtml, cashReceiptText, inventoryAlertText, orderReceivedText, shippedText } from "@/lib/emailTemplates";
 
 function getResend() {
   const resendApiKey = process.env.RESEND_API_KEY;
@@ -37,6 +37,10 @@ export type CashReceiptEmailPayload = {
   customerEmail: string;
   amountTotal: number | null;
   currency: string | null;
+  items?: Array<{
+    title: string;
+    quantity: number;
+  }>;
 };
 
 export type InventoryAlertPayload = {
@@ -78,7 +82,8 @@ export async function sendCashReceiptEmail(payload: CashReceiptEmailPayload) {
     from: getEmailFrom(),
     to: payload.customerEmail,
     subject: "LAEM Archive receipt",
-    text: cashReceiptText(payload)
+    text: cashReceiptText(payload),
+    html: cashReceiptHtml(payload)
   });
 }
 

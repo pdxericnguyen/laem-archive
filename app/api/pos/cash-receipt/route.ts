@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { sendCashReceiptEmail } from "@/lib/email";
-import { readOrder, writeOrder } from "@/lib/orders";
+import { getProduct } from "@/lib/inventory";
+import { readOrder, writeOrder, type OrderRecord } from "@/lib/orders";
 import { requirePOSOrThrow } from "@/lib/require-pos";
 import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
 
@@ -22,6 +23,29 @@ function asPositiveInt(value: string | undefined, fallback: number) {
 
 function isValidEmail(value: string) {
   return value.length <= 320 && value.includes("@") && value.includes(".");
+}
+
+async function resolveReceiptItems(order: OrderRecord) {
+  const sourceItems =
+    order.items && order.items.length > 0
+      ? order.items
+      : order.slug
+        ? [{ slug: order.slug, quantity: Math.max(1, order.quantity) }]
+        : [];
+  if (sourceItems.length === 0) {
+    return [];
+  }
+
+  const resolved = await Promise.all(
+    sourceItems.map(async (item) => {
+      const product = await getProduct(item.slug);
+      return {
+        title: product?.title || item.slug,
+        quantity: Math.max(1, item.quantity)
+      };
+    })
+  );
+  return resolved;
 }
 
 async function parseRequest(request: Request): Promise<ParsedRequest | null> {
@@ -93,12 +117,14 @@ export async function POST(request: Request) {
     ...order,
     email: parsed.email
   };
+  const receiptItems = await resolveReceiptItems(updatedOrder);
 
   await sendCashReceiptEmail({
     orderId: updatedOrder.id,
     customerEmail: parsed.email,
     amountTotal: updatedOrder.amount_total,
-    currency: updatedOrder.currency
+    currency: updatedOrder.currency,
+    items: receiptItems
   });
   await writeOrder(updatedOrder);
 

@@ -13,6 +13,32 @@ type ResendEmailPayload = {
   kind: "order_received" | "shipped";
 };
 
+async function resolveCashReceiptItems(order: Awaited<ReturnType<typeof readOrder>>) {
+  if (!order) {
+    return [];
+  }
+  const sourceItems =
+    order.items && order.items.length > 0
+      ? order.items
+      : order.slug
+        ? [{ slug: order.slug, quantity: Math.max(1, order.quantity) }]
+        : [];
+  if (sourceItems.length === 0) {
+    return [];
+  }
+
+  const resolved = await Promise.all(
+    sourceItems.map(async (item) => {
+      const product = await getProduct(item.slug);
+      return {
+        title: product?.title || item.slug,
+        quantity: Math.max(1, item.quantity)
+      };
+    })
+  );
+  return resolved;
+}
+
 function normalizeKind(value: unknown): ResendEmailPayload["kind"] | null {
   if (value === "order_received" || value === "shipped") {
     return value;
@@ -71,11 +97,13 @@ export async function POST(request: Request) {
     });
   } else {
     if (order.channel === "cash") {
+      const receiptItems = await resolveCashReceiptItems(order);
       await sendCashReceiptEmail({
         orderId: order.id,
         customerEmail: order.email,
         amountTotal: order.amount_total,
-        currency: order.currency
+        currency: order.currency,
+        items: receiptItems
       });
       await recordAdminAuditEvent({
         action: "order_email_resent",
