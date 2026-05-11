@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
+import { sendPOSReceiptEmail } from "@/lib/email";
+import { getProduct } from "@/lib/inventory";
+import { parsePOSCartMetadata } from "@/lib/pos";
 import { readOrder, writeOrder } from "@/lib/orders";
 import { requirePOSOrThrow } from "@/lib/require-pos";
 import { applyRateLimit, getRateLimitHeaders } from "@/lib/rate-limit";
@@ -73,12 +76,30 @@ function isStripeInvalidRequestError(error: unknown): error is { type: string; m
   return (error as { type?: string }).type === "StripeInvalidRequestError";
 }
 
-function getStripeInvalidRequestMessage(error: unknown, fallback: string) {
-  if (!isStripeInvalidRequestError(error)) {
-    return fallback;
+async function resolveReceiptItems(
+  order: Awaited<ReturnType<typeof readOrder>>,
+  paymentIntent: Stripe.PaymentIntent
+) {
+  const sourceItems =
+    order?.items && order.items.length > 0
+      ? order.items
+      : order?.slug
+        ? [{ slug: order.slug, quantity: Math.max(1, order.quantity) }]
+        : parsePOSCartMetadata(typeof paymentIntent.metadata?.cart === "string" ? paymentIntent.metadata.cart : null);
+  if (sourceItems.length === 0) {
+    return [];
   }
-  const message = error.message?.trim();
-  return message || fallback;
+
+  const resolved = await Promise.all(
+    sourceItems.map(async (item) => {
+      const product = await getProduct(item.slug);
+      return {
+        title: product?.title || item.slug,
+        quantity: Math.max(1, item.quantity)
+      };
+    })
+  );
+  return resolved;
 }
 
 export async function POST(request: Request) {
@@ -131,46 +152,45 @@ export async function POST(request: Request) {
     return jsonError("Cannot send receipt for a canceled payment.", 409, rateLimitHeaders);
   }
 
-  const existingEmail = typeof paymentIntent.receipt_email === "string"
-    ? paymentIntent.receipt_email.trim().toLowerCase()
-    : null;
-  const alreadySet = existingEmail === parsed.email;
-
-  let updatedPaymentIntent = paymentIntent;
-  if (!alreadySet) {
-    try {
-      updatedPaymentIntent = await stripe.paymentIntents.update(parsed.paymentIntentId, {
-        receipt_email: parsed.email
-      });
-    } catch (error) {
-      if (isStripeInvalidRequestError(error)) {
-        return jsonError(
-          getStripeInvalidRequestMessage(error, "Unable to update receipt email."),
-          409,
-          rateLimitHeaders
-        );
-      }
-      throw error;
-    }
-  }
-
   let orderEmailUpdated = false;
   const existingOrder = await readOrder(parsed.paymentIntentId, {
     skipPiiRetention: true
   });
-  if (existingOrder && !existingOrder.piiRedactedAt && existingOrder.email !== parsed.email) {
+  const existingOrderEmail = typeof existingOrder?.email === "string"
+    ? existingOrder.email.trim().toLowerCase()
+    : null;
+  const alreadySet = existingOrderEmail === parsed.email;
+
+  if (existingOrder && !existingOrder.piiRedactedAt && existingOrderEmail !== parsed.email) {
     await writeOrder({
       ...existingOrder,
       email: parsed.email
     });
     orderEmailUpdated = true;
   }
+  const receiptItems = await resolveReceiptItems(existingOrder, paymentIntent);
+  const amountTotal =
+    existingOrder?.amount_total ??
+    (typeof paymentIntent.amount_received === "number" && paymentIntent.amount_received > 0
+      ? paymentIntent.amount_received
+      : paymentIntent.amount);
+  const currency = existingOrder?.currency ?? paymentIntent.currency ?? null;
+
+  await sendPOSReceiptEmail({
+    orderId: paymentIntent.id,
+    customerEmail: parsed.email,
+    amountTotal,
+    currency,
+    paymentLabel: "Card",
+    receiptLabel: "Card Receipt",
+    items: receiptItems
+  });
 
   return NextResponse.json(
     {
       ok: true,
-      paymentIntentId: updatedPaymentIntent.id,
-      receiptEmail: updatedPaymentIntent.receipt_email ?? parsed.email,
+      paymentIntentId: paymentIntent.id,
+      receiptEmail: parsed.email,
       alreadySet,
       orderEmailUpdated
     },

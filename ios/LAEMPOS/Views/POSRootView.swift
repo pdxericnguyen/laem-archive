@@ -132,10 +132,47 @@ private enum POSDetailMode: String, CaseIterable {
     }
 }
 
+private enum POSPaymentConfirmation: String, Identifiable {
+    case card
+    case cash
+
+    var id: String {
+        rawValue
+    }
+
+    var title: String {
+        switch self {
+        case .card:
+            return "Card Payment"
+        case .cash:
+            return "Cash Sale"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .card:
+            return "creditcard"
+        case .cash:
+            return "banknote"
+        }
+    }
+
+    func actionTitle(total: String) -> String {
+        switch self {
+        case .card:
+            return "Charge Card \(total)"
+        case .cash:
+            return "Record Cash \(total)"
+        }
+    }
+}
+
 struct POSRootView: View {
     @ObservedObject var viewModel: POSViewModel
     @ObservedObject var terminalManager: LAEMTerminalManager
     @State private var detailMode: POSDetailMode = .checkout
+    @State private var paymentConfirmation: POSPaymentConfirmation?
 
     var body: some View {
         Group {
@@ -167,6 +204,20 @@ struct POSRootView: View {
                     email: email
                 )
             }
+        }
+        .sheet(item: $paymentConfirmation) { confirmation in
+            POSPaymentConfirmationView(
+                confirmation: confirmation,
+                lines: viewModel.cartLines,
+                total: viewModel.formattedTotal,
+                isProcessing: viewModel.isCharging || viewModel.isRecordingCashSale,
+                onCancel: {
+                    paymentConfirmation = nil
+                },
+                onConfirm: {
+                    confirmPayment(confirmation)
+                }
+            )
         }
         .background(POSBrand.pageBackground.ignoresSafeArea())
         .tint(POSBrand.accent)
@@ -414,8 +465,10 @@ struct POSRootView: View {
                     .buttonStyle(POSSecondaryActionStyle())
 
                     Button {
-                        Task {
-                            await viewModel.chargeCart()
+                        if terminalManager.canBeginCheckout {
+                            paymentConfirmation = .card
+                        } else {
+                            viewModel.showReaderSheet = true
                         }
                     } label: {
                         if viewModel.isCharging {
@@ -436,9 +489,7 @@ struct POSRootView: View {
                     .disabled(viewModel.isCharging || viewModel.isRecordingCashSale || viewModel.cartLines.isEmpty)
 
                     Button {
-                        Task {
-                            await viewModel.recordCashSale()
-                        }
+                        paymentConfirmation = .cash
                     } label: {
                         if viewModel.isRecordingCashSale {
                             ProgressView()
@@ -462,6 +513,113 @@ struct POSRootView: View {
                 }
             }
             .groupBoxStyle(POSPanelGroupBoxStyle())
+        }
+    }
+
+    private func confirmPayment(_ confirmation: POSPaymentConfirmation) {
+        Task {
+            switch confirmation {
+            case .card:
+                await viewModel.chargeCart()
+            case .cash:
+                await viewModel.recordCashSale()
+            }
+            await MainActor.run {
+                paymentConfirmation = nil
+            }
+        }
+    }
+}
+
+private struct POSPaymentConfirmationView: View {
+    let confirmation: POSPaymentConfirmation
+    let lines: [CartLine]
+    let total: String
+    let isProcessing: Bool
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(confirmation.title, systemImage: confirmation.systemImage)
+                        .font(.title2.weight(.semibold))
+                        .foregroundStyle(POSBrand.textPrimary)
+                    Text("Confirm this payment type before completing the sale.")
+                        .font(.subheadline)
+                        .foregroundStyle(POSBrand.textSecondary)
+                }
+
+                GroupBox("Sale") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(lines) { line in
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(line.product.title)
+                                        .font(.headline)
+                                        .foregroundStyle(POSBrand.textPrimary)
+                                    Text("\(line.quantity) x \(line.product.formattedPrice)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(POSBrand.textSecondary)
+                                }
+                                Spacer()
+                                Text(line.formattedSubtotal)
+                                    .font(.headline)
+                                    .foregroundStyle(POSBrand.textPrimary)
+                            }
+                        }
+
+                        Divider()
+
+                        HStack {
+                            Text("Total")
+                                .font(.headline)
+                            Spacer()
+                            Text(total)
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(POSBrand.textPrimary)
+                        }
+                    }
+                }
+                .groupBoxStyle(POSPanelGroupBoxStyle())
+
+                Spacer()
+
+                VStack(spacing: 10) {
+                    Button {
+                        onConfirm()
+                    } label: {
+                        if isProcessing {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Label(confirmation.actionTitle(total: total), systemImage: confirmation.systemImage)
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(POSPrimaryActionStyle())
+                    .disabled(isProcessing || lines.isEmpty)
+
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                    .buttonStyle(POSQuietActionStyle(tint: POSBrand.textSecondary))
+                    .disabled(isProcessing)
+                }
+            }
+            .padding(20)
+            .background(POSBrand.pageBackground.ignoresSafeArea())
+            .navigationTitle("Confirm Sale")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                    .disabled(isProcessing)
+                }
+            }
         }
     }
 }
@@ -603,6 +761,14 @@ private struct POSTransactionDetailView: View {
         _receiptEmail = State(initialValue: transaction.email ?? "")
     }
 
+    private var currentTransaction: POSTransaction {
+        viewModel.transactions.first { $0.id == transaction.id } ?? transaction
+    }
+
+    private var isRefunded: Bool {
+        currentTransaction.status == "refunded"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -610,21 +776,21 @@ private struct POSTransactionDetailView: View {
                     GroupBox("Transaction") {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(alignment: .firstTextBaseline) {
-                                Text(transaction.formattedTotal)
+                                Text(currentTransaction.formattedTotal)
                                     .font(.title2.weight(.semibold))
                                     .foregroundStyle(POSBrand.textPrimary)
                                 Spacer()
-                                Text(transaction.paymentLabel)
+                                Text(currentTransaction.paymentLabel)
                                     .font(.caption.weight(.semibold))
                                     .foregroundStyle(POSBrand.textSecondary)
                             }
-                            Text(transaction.formattedCreated)
+                            Text(currentTransaction.formattedCreated)
                                 .font(.subheadline)
                                 .foregroundStyle(POSBrand.textSecondary)
-                            Text(transaction.itemSummary)
+                            Text(currentTransaction.itemSummary)
                                 .font(.subheadline)
                                 .foregroundStyle(POSBrand.textPrimary)
-                            Text(transaction.id)
+                            Text(currentTransaction.id)
                                 .font(.caption.monospaced())
                                 .foregroundStyle(POSBrand.textSecondary)
                         }
@@ -686,7 +852,7 @@ private struct POSTransactionDetailView: View {
                     }
                 }
                 .buttonStyle(POSSecondaryActionStyle())
-                .disabled(isSendingReceipt || transaction.status == "refunded")
+                .disabled(isSendingReceipt || isRefunded)
 
                 if let receiptStatusMessage {
                     Label(receiptStatusMessage, systemImage: "checkmark.circle")
@@ -706,12 +872,12 @@ private struct POSTransactionDetailView: View {
     private var refundSection: some View {
         GroupBox("Refund") {
             VStack(alignment: .leading, spacing: 12) {
-                if transaction.status == "refunded" {
-                    Label(transaction.refund?.restocked == true ? "Refunded and restocked." : "Refunded without restock.", systemImage: "checkmark.circle")
+                if isRefunded {
+                    Label(currentTransaction.refund?.restocked == true ? "Refunded and restocked." : "Refunded without restock.", systemImage: "checkmark.circle")
                         .font(.subheadline)
                         .foregroundStyle(POSBrand.success)
                 } else {
-                    Text(transaction.channel == "cash" ? "Confirm cash was returned before recording the refund." : "Card refunds return to the original payment method through Stripe.")
+                    Text(currentTransaction.channel == "cash" ? "Confirm cash was returned before recording the refund." : "Card refunds return to the original payment method through Stripe.")
                         .font(.subheadline)
                         .foregroundStyle(POSBrand.textSecondary)
 
@@ -797,12 +963,14 @@ private struct POSTransactionDetailView: View {
         isSendingReceipt = true
         receiptStatusMessage = nil
         receiptErrorMessage = nil
+        let receiptTransaction = currentTransaction
         Task {
             do {
                 try await viewModel.sendReceiptEmail(
-                    referenceId: transaction.id,
-                    referenceKind: transaction.channel == "cash" ? .cashOrder : .stripeTerminal,
-                    email: normalizedEmail
+                    referenceId: receiptTransaction.id,
+                    referenceKind: receiptTransaction.channel == "cash" ? .cashOrder : .stripeTerminal,
+                    email: normalizedEmail,
+                    period: period
                 )
                 await MainActor.run {
                     isSendingReceipt = false
@@ -821,11 +989,12 @@ private struct POSTransactionDetailView: View {
     private func refundTransaction() {
         refundStatusMessage = nil
         refundErrorMessage = nil
+        let refundTransaction = currentTransaction
 
         Task {
             do {
                 try await viewModel.refundTransaction(
-                    transaction,
+                    refundTransaction,
                     restock: restock,
                     reason: refundReason,
                     note: refundNote,

@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
 import { recordAdminAuditEvent } from "@/lib/admin-audit";
-import { getStock, setStock, syncProductStockAndArchiveState } from "@/lib/inventory";
+import { syncProductStockAndArchiveState } from "@/lib/inventory";
 import { recordInventoryLedgerEvent } from "@/lib/inventory-ledger";
+import { key, kv } from "@/lib/kv";
 import {
   acquireOrderFulfillmentLock,
   readOrder,
@@ -17,6 +18,14 @@ import { requirePOSOrThrow } from "@/lib/require-pos";
 export const runtime = "nodejs";
 
 const REFUND_CONFIRMATION_TEXT = "refund";
+
+type RestockRow = {
+  slug: string;
+  quantity: number;
+  previous: number;
+  next: number;
+  alreadyRestocked: boolean;
+};
 
 type RefundPayload = {
   orderId: string;
@@ -68,35 +77,133 @@ function getOrderLineItems(order: OrderRecord): OrderLineItem[] {
   return [];
 }
 
-async function restockOrderItems(order: OrderRecord) {
-  const rows: Array<{ slug: string; quantity: number; previous: number; next: number }> = [];
-
+function getRestockLineItems(order: OrderRecord): OrderLineItem[] {
+  const bySlug = new Map<string, number>();
   for (const item of getOrderLineItems(order)) {
+    const slug = item.slug.trim();
+    if (!slug) {
+      continue;
+    }
     const quantity = Math.max(1, Math.floor(item.quantity || 1));
-    const previous = await getStock(item.slug);
-    const next = previous + quantity;
-    await setStock(item.slug, next);
-    await syncProductStockAndArchiveState(item.slug, next);
-    await recordInventoryLedgerEvent({
-      slug: item.slug,
-      kind: "stock_adjusted",
-      source: order.channel === "terminal" ? "terminal" : "cash",
-      referenceId: order.id,
-      quantity,
-      stockBefore: previous,
-      stockAfter: next,
-      stockDelta: quantity,
-      note: "Restocked after POS refund."
-    });
+    bySlug.set(slug, (bySlug.get(slug) || 0) + quantity);
+  }
+  return Array.from(bySlug.entries()).map(([slug, quantity]) => ({ slug, quantity }));
+}
+
+function getRefundRestockMarkerKey(orderId: string, slug: string) {
+  return `order:refund-restock:${orderId}:${slug}`;
+}
+
+function parseRestockScriptResponse(response: unknown) {
+  if (!Array.isArray(response) || response.length < 3) {
+    throw new Error("Unable to verify refund restock.");
+  }
+  const applied = Number(response[0]) === 1;
+  const previous = Number(response[1]);
+  const next = Number(response[2]);
+  if (!Number.isFinite(previous) || !Number.isFinite(next)) {
+    throw new Error("Unable to verify refund restock.");
+  }
+  return {
+    applied,
+    previous: Math.floor(previous),
+    next: Math.floor(next)
+  };
+}
+
+async function restockOrderItems(order: OrderRecord): Promise<RestockRow[]> {
+  const rows: RestockRow[] = [];
+  const script = `
+local markerExists = redis.call("EXISTS", KEYS[2])
+if markerExists == 1 then
+  local current = tonumber(redis.call("GET", KEYS[1]) or "0")
+  return {0, current, current}
+end
+local quantity = tonumber(ARGV[1])
+local nextStock = tonumber(redis.call("INCRBY", KEYS[1], quantity))
+local previousStock = nextStock - quantity
+redis.call("SET", KEYS[2], ARGV[2])
+return {1, previousStock, nextStock}
+`;
+
+  for (const item of getRestockLineItems(order)) {
+    const markerKey = getRefundRestockMarkerKey(order.id, item.slug);
+    const response = await kv.eval(
+      script,
+      [key.stock(item.slug), markerKey],
+      [String(item.quantity), "1"]
+    );
+    const result = parseRestockScriptResponse(response);
+    await syncProductStockAndArchiveState(item.slug, result.next);
+    if (result.applied) {
+      await recordInventoryLedgerEvent({
+        slug: item.slug,
+        kind: "stock_adjusted",
+        source: order.channel === "terminal" ? "terminal" : "cash",
+        referenceId: order.id,
+        quantity: item.quantity,
+        stockBefore: result.previous,
+        stockAfter: result.next,
+        stockDelta: item.quantity,
+        note: "Restocked after POS refund."
+      });
+    }
     rows.push({
       slug: item.slug,
-      quantity,
-      previous,
-      next
+      quantity: item.quantity,
+      previous: result.previous,
+      next: result.next,
+      alreadyRestocked: !result.applied
     });
   }
 
   return rows;
+}
+
+async function repairRefundRestock(order: OrderRecord) {
+  const restockLineItems = getRestockLineItems(order);
+  if (restockLineItems.length === 0) {
+    return {
+      order,
+      restockedRows: [] as RestockRow[]
+    };
+  }
+
+  const restockedRows = await restockOrderItems(order);
+  const repairedOrder: OrderRecord = {
+    ...order,
+    refund: order.refund
+      ? {
+          ...order.refund,
+          restocked: true
+        }
+      : {
+          refundId: null,
+          amount: order.amount_total,
+          currency: order.currency,
+          reason: null,
+          restocked: true,
+          refundedAt: Math.floor(Date.now() / 1000)
+        }
+  };
+  await writeOrder(repairedOrder);
+
+  await recordAdminAuditEvent({
+    action: "order_refunded",
+    entity: "order",
+    entityId: order.id,
+    summary: "POS refund restock repaired",
+    details: {
+      refundId: repairedOrder.refund?.refundId || null,
+      channel: order.channel,
+      restocked: restockedRows
+    }
+  });
+
+  return {
+    order: repairedOrder,
+    restockedRows
+  };
 }
 
 async function createStripeRefund(order: OrderRecord, reason: RefundPayload["reason"]) {
@@ -165,6 +272,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Only POS transactions can be refunded here." }, { status: 409 });
     }
     if (order.status === "refunded" || order.status === "canceled") {
+      if (order.status === "refunded" && payload.restock && order.refund?.restocked !== true) {
+        const repair = await repairRefundRestock(order);
+        return NextResponse.json({
+          ok: true,
+          already: true,
+          refund: repair.order.refund || null,
+          restocked: repair.restockedRows
+        });
+      }
       return NextResponse.json({ ok: true, already: true, refund: order.refund || null, restocked: [] });
     }
 

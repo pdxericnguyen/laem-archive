@@ -21,7 +21,6 @@ export const runtime = "nodejs";
 
 type ParsedRequest = {
   items: Array<{ slug: string; quantity: number }>;
-  email: string | null;
   captureMethod: "automatic";
 };
 
@@ -63,7 +62,6 @@ async function parseRequest(request: Request): Promise<ParsedRequest | null> {
         return single ? [single] : [];
       })();
 
-  const email = typeof body.email === "string" && body.email.trim() ? body.email.trim() : null;
   const captureMethod = parseCaptureMethod(body.captureMethod);
   if (!captureMethod) {
     return null;
@@ -71,7 +69,6 @@ async function parseRequest(request: Request): Promise<ParsedRequest | null> {
 
   return {
     items,
-    email,
     captureMethod
   };
 }
@@ -150,7 +147,6 @@ export async function POST(request: Request) {
     currency,
     capture_method: parsed.captureMethod,
     payment_method_types: ["card_present"],
-    receipt_email: parsed.email || undefined,
     metadata: {
       source: "laem_pos_terminal",
       cart: payloadValidation.cartMetadata,

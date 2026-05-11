@@ -3,44 +3,44 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 71;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		AA0000000000000000000040 /* LAEMPOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000030 /* LAEMPOSApp.swift */; };
-		AA0000000000000000000041 /* AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000031 /* AppConfiguration.swift */; };
-		AA0000000000000000000042 /* Product.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000032 /* Product.swift */; };
-		AA0000000000000000000043 /* CartLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000033 /* CartLine.swift */; };
-		AA0000000000000000000044 /* CheckoutResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000034 /* CheckoutResult.swift */; };
-		AA0000000000000000000045 /* ReaderStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000035 /* ReaderStatus.swift */; };
-		AA0000000000000000000046 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000036 /* APIClient.swift */; };
-		AA0000000000000000000047 /* LAEMTerminalManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000037 /* LAEMTerminalManager.swift */; };
-		AA0000000000000000000048 /* POSViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000038 /* POSViewModel.swift */; };
-		AA0000000000000000000049 /* POSRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000039 /* POSRootView.swift */; };
-		AA000000000000000000004A /* ReaderSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003A /* ReaderSheetView.swift */; };
-		AA000000000000000000004B /* OrderResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003B /* OrderResultView.swift */; };
-		AA000000000000000000004C /* ReaderStatusCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003C /* ReaderStatusCard.swift */; };
+		AA0000000000000000000040 /* App/LAEMPOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000030 /* App/LAEMPOSApp.swift */; };
+		AA0000000000000000000041 /* Configuration/AppConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000031 /* Configuration/AppConfiguration.swift */; };
+		AA0000000000000000000042 /* Models/Product.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000032 /* Models/Product.swift */; };
+		AA0000000000000000000043 /* Models/CartLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000033 /* Models/CartLine.swift */; };
+		AA0000000000000000000044 /* Models/CheckoutResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000034 /* Models/CheckoutResult.swift */; };
+		AA0000000000000000000045 /* Models/ReaderStatus.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000035 /* Models/ReaderStatus.swift */; };
+		AA0000000000000000000046 /* Services/APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000036 /* Services/APIClient.swift */; };
+		AA0000000000000000000047 /* Services/LAEMTerminalManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000037 /* Services/LAEMTerminalManager.swift */; };
+		AA0000000000000000000048 /* ViewModels/POSViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000038 /* ViewModels/POSViewModel.swift */; };
+		AA0000000000000000000049 /* Views/POSRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000039 /* Views/POSRootView.swift */; };
+		AA000000000000000000004A /* Views/ReaderSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003A /* Views/ReaderSheetView.swift */; };
+		AA000000000000000000004B /* Views/OrderResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003B /* Views/OrderResultView.swift */; };
+		AA000000000000000000004C /* Views/ReaderStatusCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000003C /* Views/ReaderStatusCard.swift */; };
 		AA000000000000000000004D /* StripeTerminal in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000050 /* StripeTerminal */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		AA0000000000000000000017 /* LAEMPOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LAEMPOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000027 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-		AA0000000000000000000028 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Resources/Info.plist; sourceTree = "<group>"; };
+		AA0000000000000000000028 /* Resources/Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Resources/Info.plist; sourceTree = "<group>"; };
 		AA0000000000000000000029 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
-		AA0000000000000000000030 /* LAEMPOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/LAEMPOSApp.swift; sourceTree = "<group>"; };
-		AA0000000000000000000031 /* AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Configuration/AppConfiguration.swift; sourceTree = "<group>"; };
-		AA0000000000000000000032 /* Product.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/Product.swift; sourceTree = "<group>"; };
-		AA0000000000000000000033 /* CartLine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/CartLine.swift; sourceTree = "<group>"; };
-		AA0000000000000000000034 /* CheckoutResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/CheckoutResult.swift; sourceTree = "<group>"; };
-		AA0000000000000000000035 /* ReaderStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/ReaderStatus.swift; sourceTree = "<group>"; };
-		AA0000000000000000000036 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/APIClient.swift; sourceTree = "<group>"; };
-		AA0000000000000000000037 /* LAEMTerminalManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LAEMTerminalManager.swift; sourceTree = "<group>"; };
-		AA0000000000000000000038 /* POSViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels/POSViewModel.swift; sourceTree = "<group>"; };
-		AA0000000000000000000039 /* POSRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/POSRootView.swift; sourceTree = "<group>"; };
-		AA000000000000000000003A /* ReaderSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ReaderSheetView.swift; sourceTree = "<group>"; };
-		AA000000000000000000003B /* OrderResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/OrderResultView.swift; sourceTree = "<group>"; };
-		AA000000000000000000003C /* ReaderStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ReaderStatusCard.swift; sourceTree = "<group>"; };
+		AA0000000000000000000030 /* App/LAEMPOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App/LAEMPOSApp.swift; sourceTree = "<group>"; };
+		AA0000000000000000000031 /* Configuration/AppConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Configuration/AppConfiguration.swift; sourceTree = "<group>"; };
+		AA0000000000000000000032 /* Models/Product.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/Product.swift; sourceTree = "<group>"; };
+		AA0000000000000000000033 /* Models/CartLine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/CartLine.swift; sourceTree = "<group>"; };
+		AA0000000000000000000034 /* Models/CheckoutResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/CheckoutResult.swift; sourceTree = "<group>"; };
+		AA0000000000000000000035 /* Models/ReaderStatus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/ReaderStatus.swift; sourceTree = "<group>"; };
+		AA0000000000000000000036 /* Services/APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/APIClient.swift; sourceTree = "<group>"; };
+		AA0000000000000000000037 /* Services/LAEMTerminalManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/LAEMTerminalManager.swift; sourceTree = "<group>"; };
+		AA0000000000000000000038 /* ViewModels/POSViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewModels/POSViewModel.swift; sourceTree = "<group>"; };
+		AA0000000000000000000039 /* Views/POSRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/POSRootView.swift; sourceTree = "<group>"; };
+		AA000000000000000000003A /* Views/ReaderSheetView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ReaderSheetView.swift; sourceTree = "<group>"; };
+		AA000000000000000000003B /* Views/OrderResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/OrderResultView.swift; sourceTree = "<group>"; };
+		AA000000000000000000003C /* Views/ReaderStatusCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ReaderStatusCard.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,7 +90,7 @@
 		AA0000000000000000000020 /* App */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000030 /* LAEMPOSApp.swift */,
+				AA0000000000000000000030 /* App/LAEMPOSApp.swift */,
 			);
 			name = App;
 			sourceTree = "<group>";
@@ -98,7 +98,7 @@
 		AA0000000000000000000021 /* Configuration */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000031 /* AppConfiguration.swift */,
+				AA0000000000000000000031 /* Configuration/AppConfiguration.swift */,
 			);
 			name = Configuration;
 			sourceTree = "<group>";
@@ -106,10 +106,10 @@
 		AA0000000000000000000022 /* Models */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000032 /* Product.swift */,
-				AA0000000000000000000033 /* CartLine.swift */,
-				AA0000000000000000000034 /* CheckoutResult.swift */,
-				AA0000000000000000000035 /* ReaderStatus.swift */,
+				AA0000000000000000000032 /* Models/Product.swift */,
+				AA0000000000000000000033 /* Models/CartLine.swift */,
+				AA0000000000000000000034 /* Models/CheckoutResult.swift */,
+				AA0000000000000000000035 /* Models/ReaderStatus.swift */,
 			);
 			name = Models;
 			sourceTree = "<group>";
@@ -117,8 +117,8 @@
 		AA0000000000000000000023 /* Services */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000036 /* APIClient.swift */,
-				AA0000000000000000000037 /* LAEMTerminalManager.swift */,
+				AA0000000000000000000036 /* Services/APIClient.swift */,
+				AA0000000000000000000037 /* Services/LAEMTerminalManager.swift */,
 			);
 			name = Services;
 			sourceTree = "<group>";
@@ -126,7 +126,7 @@
 		AA0000000000000000000024 /* ViewModels */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000038 /* POSViewModel.swift */,
+				AA0000000000000000000038 /* ViewModels/POSViewModel.swift */,
 			);
 			name = ViewModels;
 			sourceTree = "<group>";
@@ -134,10 +134,10 @@
 		AA0000000000000000000025 /* Views */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000039 /* POSRootView.swift */,
-				AA000000000000000000003A /* ReaderSheetView.swift */,
-				AA000000000000000000003B /* OrderResultView.swift */,
-				AA000000000000000000003C /* ReaderStatusCard.swift */,
+				AA0000000000000000000039 /* Views/POSRootView.swift */,
+				AA000000000000000000003A /* Views/ReaderSheetView.swift */,
+				AA000000000000000000003B /* Views/OrderResultView.swift */,
+				AA000000000000000000003C /* Views/ReaderStatusCard.swift */,
 			);
 			name = Views;
 			sourceTree = "<group>";
@@ -145,7 +145,7 @@
 		AA0000000000000000000026 /* Resources */ = {
 			isa = PBXGroup;
 			children = (
-				AA0000000000000000000028 /* Info.plist */,
+				AA0000000000000000000028 /* Resources/Info.plist */,
 			);
 			name = Resources;
 			sourceTree = "<group>";
@@ -201,7 +201,6 @@
 			packageReferences = (
 				AA000000000000000000004F /* XCRemoteSwiftPackageReference "stripe-terminal-ios" */,
 			);
-			preferredProjectObjectVersion = 77;
 			productRefGroup = AA0000000000000000000003 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -226,34 +225,23 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AA0000000000000000000040 /* LAEMPOSApp.swift in Sources */,
-				AA0000000000000000000041 /* AppConfiguration.swift in Sources */,
-				AA0000000000000000000042 /* Product.swift in Sources */,
-				AA0000000000000000000043 /* CartLine.swift in Sources */,
-				AA0000000000000000000044 /* CheckoutResult.swift in Sources */,
-				AA0000000000000000000045 /* ReaderStatus.swift in Sources */,
-				AA0000000000000000000046 /* APIClient.swift in Sources */,
-				AA0000000000000000000047 /* LAEMTerminalManager.swift in Sources */,
-				AA0000000000000000000048 /* POSViewModel.swift in Sources */,
-				AA0000000000000000000049 /* POSRootView.swift in Sources */,
-				AA000000000000000000004A /* ReaderSheetView.swift in Sources */,
-				AA000000000000000000004B /* OrderResultView.swift in Sources */,
-				AA000000000000000000004C /* ReaderStatusCard.swift in Sources */,
+				AA0000000000000000000040 /* App/LAEMPOSApp.swift in Sources */,
+				AA0000000000000000000041 /* Configuration/AppConfiguration.swift in Sources */,
+				AA0000000000000000000042 /* Models/Product.swift in Sources */,
+				AA0000000000000000000043 /* Models/CartLine.swift in Sources */,
+				AA0000000000000000000044 /* Models/CheckoutResult.swift in Sources */,
+				AA0000000000000000000045 /* Models/ReaderStatus.swift in Sources */,
+				AA0000000000000000000046 /* Services/APIClient.swift in Sources */,
+				AA0000000000000000000047 /* Services/LAEMTerminalManager.swift in Sources */,
+				AA0000000000000000000048 /* ViewModels/POSViewModel.swift in Sources */,
+				AA0000000000000000000049 /* Views/POSRootView.swift in Sources */,
+				AA000000000000000000004A /* Views/ReaderSheetView.swift in Sources */,
+				AA000000000000000000004B /* Views/OrderResultView.swift in Sources */,
+				AA000000000000000000004C /* Views/ReaderStatusCard.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
-
-/* Begin XCRemoteSwiftPackageReference section */
-		AA000000000000000000004F /* XCRemoteSwiftPackageReference "stripe-terminal-ios" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/stripe/stripe-terminal-ios";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 5.0.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCBuildConfiguration section */
 		AA0000000000000000000005 /* Debug */ = {
@@ -297,7 +285,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 97SPH8YBQ6;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LAEMPOS/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -321,7 +309,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 97SPH8YBQ6;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = LAEMPOS/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -361,6 +349,17 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		AA000000000000000000004F /* XCRemoteSwiftPackageReference "stripe-terminal-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stripe/stripe-terminal-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		AA0000000000000000000050 /* StripeTerminal */ = {

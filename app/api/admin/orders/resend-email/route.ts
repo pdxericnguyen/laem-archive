@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { recordAdminAuditEvent } from "@/lib/admin-audit";
-import { sendCashReceiptEmail, sendOrderReceivedEmail, sendShippedEmail } from "@/lib/email";
+import { sendCashReceiptEmail, sendOrderReceivedEmail, sendPOSReceiptEmail, sendShippedEmail } from "@/lib/email";
 import { getProduct } from "@/lib/inventory";
 import { readOrder } from "@/lib/orders";
 import { requireAdminOrThrow } from "@/lib/require-admin";
@@ -112,6 +112,29 @@ export async function POST(request: Request) {
         summary: "Cash receipt email resent",
         details: {
           kind: "cash_receipt",
+          customerEmail: order.email
+        }
+      });
+      return NextResponse.json({ ok: true });
+    }
+    if (order.channel === "terminal") {
+      const receiptItems = await resolveCashReceiptItems(order);
+      await sendPOSReceiptEmail({
+        orderId: order.id,
+        customerEmail: order.email,
+        amountTotal: order.amount_total,
+        currency: order.currency,
+        paymentLabel: "Card",
+        receiptLabel: "Card Receipt",
+        items: receiptItems
+      });
+      await recordAdminAuditEvent({
+        action: "order_email_resent",
+        entity: "order",
+        entityId: order.id,
+        summary: "Card receipt email resent",
+        details: {
+          kind: "card_receipt",
           customerEmail: order.email
         }
       });

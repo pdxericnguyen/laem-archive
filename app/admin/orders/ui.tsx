@@ -1216,7 +1216,7 @@ function OrderCard({
           >
             {resendingEmail === "order_received"
               ? "Resending..."
-              : row.channel === "cash"
+              : row.channel === "cash" || row.channel === "terminal"
                 ? "Resend Receipt"
                 : "Resend Order Email"}
           </button>

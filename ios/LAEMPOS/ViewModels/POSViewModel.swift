@@ -416,7 +416,8 @@ final class POSViewModel: ObservableObject {
     func sendReceiptEmail(
         referenceId: String,
         referenceKind: ReceiptReferenceKind,
-        email: String
+        email: String,
+        period: String = "today"
     ) async throws {
         guard !requiresAuthentication else {
             authErrorMessage = "Sign in before sending a receipt."
@@ -448,7 +449,7 @@ final class POSViewModel: ObservableObject {
             style: .info,
             message: "Receipt email saved for \(normalizedEmail)."
         )
-        await loadTransactions(period: "today", silent: true)
+        await loadTransactions(period: period, silent: true)
     }
 
     private func saveCachedProducts(_ products: [Product]) {
