@@ -118,9 +118,24 @@ struct POSStepperButtonStyle: ButtonStyle {
     }
 }
 
+private enum POSDetailMode: String, CaseIterable {
+    case checkout
+    case transactions
+
+    var label: String {
+        switch self {
+        case .checkout:
+            return "Checkout"
+        case .transactions:
+            return "Transactions"
+        }
+    }
+}
+
 struct POSRootView: View {
     @ObservedObject var viewModel: POSViewModel
     @ObservedObject var terminalManager: LAEMTerminalManager
+    @State private var detailMode: POSDetailMode = .checkout
 
     var body: some View {
         Group {
@@ -306,121 +321,574 @@ struct POSRootView: View {
     private var checkoutPane: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
-                ReaderStatusCard(terminalManager: terminalManager) {
-                    viewModel.showReaderSheet = true
-                }
-
-                GroupBox("Cart") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if viewModel.cartLines.isEmpty {
-                            Text("No items selected yet.")
-                                .foregroundStyle(POSBrand.textSecondary)
-                        } else {
-                            ForEach(viewModel.cartLines) { line in
-                                HStack(alignment: .firstTextBaseline) {
-                                    VStack(alignment: .leading, spacing: 4) {
-                                        Text(line.product.title)
-                                            .font(.headline)
-                                            .foregroundStyle(POSBrand.textPrimary)
-                                        Text("\(line.quantity) x \(line.product.formattedPrice)")
-                                            .font(.subheadline)
-                                            .foregroundStyle(POSBrand.textSecondary)
-                                    }
-                                    Spacer()
-                                    Text(line.formattedSubtotal)
-                                        .font(.headline)
-                                        .foregroundStyle(POSBrand.textPrimary)
-                                }
-                            }
-                        }
-
-                        Divider()
-
-                        HStack {
-                            Text("Total")
-                                .font(.headline)
-                            Spacer()
-                            Text(viewModel.formattedTotal)
-                                .font(.title3.weight(.semibold))
-                        }
+                Picker("POS view", selection: $detailMode) {
+                    ForEach(POSDetailMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
                     }
                 }
-                .groupBoxStyle(POSPanelGroupBoxStyle())
+                .pickerStyle(.segmented)
 
-                GroupBox("Checkout") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Reader family: \(terminalManager.selectedReaderFamily.displayName)")
-                            .font(.subheadline)
-                            .foregroundStyle(POSBrand.textSecondary)
-
-                        if let authMessage = viewModel.authErrorMessage {
-                            Label(authMessage, systemImage: "person.badge.key")
-                                .font(.subheadline)
-                                .foregroundStyle(POSBrand.warning)
-                        }
-
-                        Button {
-                            viewModel.showReaderSheet = true
-                        } label: {
-                            Label("Reader Setup", systemImage: "dot.radiowaves.left.and.right")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(POSSecondaryActionStyle())
-
-                        Button {
-                            Task {
-                                await viewModel.chargeCart()
-                            }
-                        } label: {
-                            if viewModel.isCharging {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                            } else if viewModel.cartLines.isEmpty {
-                                Label("Add Items to Charge", systemImage: "cart")
-                                    .frame(maxWidth: .infinity)
-                            } else if !terminalManager.canBeginCheckout {
-                                Label("Connect Reader", systemImage: "dot.radiowaves.left.and.right")
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Label("Charge \(viewModel.formattedTotal)", systemImage: "creditcard")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .buttonStyle(POSPrimaryActionStyle())
-                        .disabled(viewModel.isCharging || viewModel.isRecordingCashSale || viewModel.cartLines.isEmpty)
-
-                        Button {
-                            Task {
-                                await viewModel.recordCashSale()
-                            }
-                        } label: {
-                            if viewModel.isRecordingCashSale {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                            } else if viewModel.cartLines.isEmpty {
-                                Label("Add Items for Cash", systemImage: "banknote")
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Label("Record Cash \(viewModel.formattedTotal)", systemImage: "banknote")
-                                    .frame(maxWidth: .infinity)
-                            }
-                        }
-                        .buttonStyle(POSSecondaryActionStyle())
-                        .disabled(viewModel.isCharging || viewModel.isRecordingCashSale || viewModel.cartLines.isEmpty)
-
-                        Button("Clear Cart", role: .destructive) {
-                            viewModel.clearCart()
-                        }
-                        .buttonStyle(POSQuietActionStyle(tint: POSBrand.danger))
-                        .disabled(viewModel.cartLines.isEmpty)
-                    }
+                if detailMode == .checkout {
+                    checkoutContent
+                } else {
+                    POSTransactionsPanel(viewModel: viewModel)
                 }
-                .groupBoxStyle(POSPanelGroupBoxStyle())
             }
             .padding(20)
         }
+        .task(id: detailMode) {
+            guard detailMode == .transactions else {
+                return
+            }
+            await viewModel.loadTransactions()
+        }
         .background(POSBrand.pageBackground)
-        .navigationTitle("Checkout")
+        .navigationTitle(detailMode.label)
+    }
+
+    private var checkoutContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ReaderStatusCard(terminalManager: terminalManager) {
+                viewModel.showReaderSheet = true
+            }
+
+            GroupBox("Cart") {
+                VStack(alignment: .leading, spacing: 12) {
+                    if viewModel.cartLines.isEmpty {
+                        Text("No items selected yet.")
+                            .foregroundStyle(POSBrand.textSecondary)
+                    } else {
+                        ForEach(viewModel.cartLines) { line in
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(line.product.title)
+                                        .font(.headline)
+                                        .foregroundStyle(POSBrand.textPrimary)
+                                    Text("\(line.quantity) x \(line.product.formattedPrice)")
+                                        .font(.subheadline)
+                                        .foregroundStyle(POSBrand.textSecondary)
+                                }
+                                Spacer()
+                                Text(line.formattedSubtotal)
+                                    .font(.headline)
+                                    .foregroundStyle(POSBrand.textPrimary)
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    HStack {
+                        Text("Total")
+                            .font(.headline)
+                        Spacer()
+                        Text(viewModel.formattedTotal)
+                            .font(.title3.weight(.semibold))
+                    }
+                }
+            }
+            .groupBoxStyle(POSPanelGroupBoxStyle())
+
+            GroupBox("Payment") {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Choose card or cash for this sale.")
+                        .font(.subheadline)
+                        .foregroundStyle(POSBrand.textSecondary)
+
+                    Text("Reader family: \(terminalManager.selectedReaderFamily.displayName)")
+                        .font(.subheadline)
+                        .foregroundStyle(POSBrand.textSecondary)
+
+                    if let authMessage = viewModel.authErrorMessage {
+                        Label(authMessage, systemImage: "person.badge.key")
+                            .font(.subheadline)
+                            .foregroundStyle(POSBrand.warning)
+                    }
+
+                    Button {
+                        viewModel.showReaderSheet = true
+                    } label: {
+                        Label("Reader & Terminal", systemImage: "dot.radiowaves.left.and.right")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(POSSecondaryActionStyle())
+
+                    Button {
+                        Task {
+                            await viewModel.chargeCart()
+                        }
+                    } label: {
+                        if viewModel.isCharging {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else if viewModel.cartLines.isEmpty {
+                            Label("Add Items to Charge Card", systemImage: "cart")
+                                .frame(maxWidth: .infinity)
+                        } else if !terminalManager.canBeginCheckout {
+                            Label("Connect Reader to Charge Card", systemImage: "dot.radiowaves.left.and.right")
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Label("Charge Card \(viewModel.formattedTotal)", systemImage: "creditcard")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(POSPrimaryActionStyle())
+                    .disabled(viewModel.isCharging || viewModel.isRecordingCashSale || viewModel.cartLines.isEmpty)
+
+                    Button {
+                        Task {
+                            await viewModel.recordCashSale()
+                        }
+                    } label: {
+                        if viewModel.isRecordingCashSale {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else if viewModel.cartLines.isEmpty {
+                            Label("Add Items for Cash Sale", systemImage: "banknote")
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Label("Record Cash Sale \(viewModel.formattedTotal)", systemImage: "banknote")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(POSSecondaryActionStyle())
+                    .disabled(viewModel.isCharging || viewModel.isRecordingCashSale || viewModel.cartLines.isEmpty)
+
+                    Button("Clear Cart", role: .destructive) {
+                        viewModel.clearCart()
+                    }
+                    .buttonStyle(POSQuietActionStyle(tint: POSBrand.danger))
+                    .disabled(viewModel.cartLines.isEmpty)
+                }
+            }
+            .groupBoxStyle(POSPanelGroupBoxStyle())
+        }
+    }
+}
+
+private struct POSTransactionsPanel: View {
+    @ObservedObject var viewModel: POSViewModel
+    @State private var period = "today"
+    @State private var selectedTransaction: POSTransaction?
+
+    var body: some View {
+        GroupBox("Transactions") {
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("Period", selection: $period) {
+                    Text("Today").tag("today")
+                    Text("7 Days").tag("week")
+                }
+                .pickerStyle(.segmented)
+
+                HStack {
+                    Text(period == "today" ? "POS sales from today" : "POS sales from the last 7 days")
+                        .font(.subheadline)
+                        .foregroundStyle(POSBrand.textSecondary)
+                    Spacer()
+                    Button {
+                        Task {
+                            await viewModel.loadTransactions(period: period)
+                        }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(POSStepperButtonStyle())
+                }
+
+                if viewModel.isLoadingTransactions {
+                    ProgressView("Loading transactions...")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else if let message = viewModel.transactionErrorMessage {
+                    Label(message, systemImage: "exclamationmark.triangle")
+                        .font(.subheadline)
+                        .foregroundStyle(POSBrand.danger)
+                } else if viewModel.transactions.isEmpty {
+                    Text("No POS transactions for this period.")
+                        .font(.subheadline)
+                        .foregroundStyle(POSBrand.textSecondary)
+                } else {
+                    VStack(spacing: 10) {
+                        ForEach(viewModel.transactions) { transaction in
+                            Button {
+                                selectedTransaction = transaction
+                            } label: {
+                                POSTransactionRow(transaction: transaction)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+        }
+        .groupBoxStyle(POSPanelGroupBoxStyle())
+        .onChange(of: period) { _, nextPeriod in
+            Task {
+                await viewModel.loadTransactions(period: nextPeriod)
+            }
+        }
+        .sheet(item: $selectedTransaction) { transaction in
+            POSTransactionDetailView(
+                transaction: transaction,
+                period: period,
+                viewModel: viewModel
+            )
+        }
+    }
+}
+
+private struct POSTransactionRow: View {
+    let transaction: POSTransaction
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(transaction.primaryItemTitle)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(POSBrand.textPrimary)
+                    Text("\(transaction.paymentLabel) • \(transaction.formattedCreated)")
+                        .font(.caption)
+                        .foregroundStyle(POSBrand.textSecondary)
+                }
+                Spacer()
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(transaction.formattedTotal)
+                        .font(.headline.monospacedDigit())
+                        .foregroundStyle(POSBrand.textPrimary)
+                    Text(transaction.statusLabel)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(transaction.status == "refunded" ? POSBrand.danger : POSBrand.success)
+                }
+            }
+
+            if let email = transaction.email, !email.isEmpty {
+                Label(email, systemImage: "envelope")
+                    .font(.caption)
+                    .foregroundStyle(POSBrand.textSecondary)
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(POSBrand.cardBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(POSBrand.cardBorder, lineWidth: 1)
+        )
+    }
+}
+
+private struct POSTransactionDetailView: View {
+    let transaction: POSTransaction
+    let period: String
+    @ObservedObject var viewModel: POSViewModel
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var receiptEmail: String
+    @State private var receiptStatusMessage: String?
+    @State private var receiptErrorMessage: String?
+    @State private var isSendingReceipt = false
+    @State private var restock = true
+    @State private var refundReason = "requested_by_customer"
+    @State private var refundNote = ""
+    @State private var refundConfirmation = ""
+    @State private var refundStatusMessage: String?
+    @State private var refundErrorMessage: String?
+
+    init(transaction: POSTransaction, period: String, viewModel: POSViewModel) {
+        self.transaction = transaction
+        self.period = period
+        self.viewModel = viewModel
+        _receiptEmail = State(initialValue: transaction.email ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    GroupBox("Transaction") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(transaction.formattedTotal)
+                                    .font(.title2.weight(.semibold))
+                                    .foregroundStyle(POSBrand.textPrimary)
+                                Spacer()
+                                Text(transaction.paymentLabel)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(POSBrand.textSecondary)
+                            }
+                            Text(transaction.formattedCreated)
+                                .font(.subheadline)
+                                .foregroundStyle(POSBrand.textSecondary)
+                            Text(transaction.itemSummary)
+                                .font(.subheadline)
+                                .foregroundStyle(POSBrand.textPrimary)
+                            Text(transaction.id)
+                                .font(.caption.monospaced())
+                                .foregroundStyle(POSBrand.textSecondary)
+                        }
+                    }
+                    .groupBoxStyle(POSPanelGroupBoxStyle())
+
+                    receiptSection
+                    refundSection
+                }
+                .padding(20)
+            }
+            .background(POSBrand.pageBackground.ignoresSafeArea())
+            .navigationTitle("Transaction")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+
+    private var receiptSection: some View {
+        GroupBox("Receipt") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Correct or resend the receipt email for this transaction.")
+                    .font(.subheadline)
+                    .foregroundStyle(POSBrand.textSecondary)
+
+                TextField("name@email.com", text: $receiptEmail)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.emailAddress)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(POSBrand.cardBackground)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(POSBrand.cardBorder, lineWidth: 1)
+                    )
+                    .onSubmit {
+                        sendReceipt()
+                    }
+
+                Button {
+                    sendReceipt()
+                } label: {
+                    if isSendingReceipt {
+                        ProgressView()
+                            .frame(maxWidth: .infinity)
+                    } else {
+                        Label("Send Receipt Email", systemImage: "envelope")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(POSSecondaryActionStyle())
+                .disabled(isSendingReceipt || transaction.status == "refunded")
+
+                if let receiptStatusMessage {
+                    Label(receiptStatusMessage, systemImage: "checkmark.circle")
+                        .font(.footnote)
+                        .foregroundStyle(POSBrand.success)
+                }
+                if let receiptErrorMessage {
+                    Label(receiptErrorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(POSBrand.danger)
+                }
+            }
+        }
+        .groupBoxStyle(POSPanelGroupBoxStyle())
+    }
+
+    private var refundSection: some View {
+        GroupBox("Refund") {
+            VStack(alignment: .leading, spacing: 12) {
+                if transaction.status == "refunded" {
+                    Label(transaction.refund?.restocked == true ? "Refunded and restocked." : "Refunded without restock.", systemImage: "checkmark.circle")
+                        .font(.subheadline)
+                        .foregroundStyle(POSBrand.success)
+                } else {
+                    Text(transaction.channel == "cash" ? "Confirm cash was returned before recording the refund." : "Card refunds return to the original payment method through Stripe.")
+                        .font(.subheadline)
+                        .foregroundStyle(POSBrand.textSecondary)
+
+                    Toggle("Return item to stock", isOn: $restock)
+                        .font(.subheadline.weight(.semibold))
+
+                    Picker("Reason", selection: $refundReason) {
+                        Text("Customer request").tag("requested_by_customer")
+                        Text("Duplicate sale").tag("duplicate")
+                        Text("Fraudulent").tag("fraudulent")
+                    }
+                    .pickerStyle(.menu)
+
+                    TextField("Optional note", text: $refundNote, axis: .vertical)
+                        .lineLimit(2...4)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 11)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(POSBrand.cardBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(POSBrand.cardBorder, lineWidth: 1)
+                        )
+
+                    TextField("Type refund", text: $refundConfirmation)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 11)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(POSBrand.cardBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(POSBrand.cardBorder, lineWidth: 1)
+                        )
+
+                    Button(role: .destructive) {
+                        refundTransaction()
+                    } label: {
+                        if viewModel.isRefundingTransaction {
+                            ProgressView()
+                                .frame(maxWidth: .infinity)
+                        } else {
+                            Label(restock ? "Refund and Restock" : "Refund Only", systemImage: "arrow.uturn.backward")
+                                .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(POSSecondaryActionStyle())
+                    .disabled(viewModel.isRefundingTransaction || refundConfirmation.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != "refund")
+                }
+
+                if let refundStatusMessage {
+                    Label(refundStatusMessage, systemImage: "checkmark.circle")
+                        .font(.footnote)
+                        .foregroundStyle(POSBrand.success)
+                }
+                if let refundErrorMessage {
+                    Label(refundErrorMessage, systemImage: "exclamationmark.triangle")
+                        .font(.footnote)
+                        .foregroundStyle(POSBrand.danger)
+                }
+            }
+        }
+        .groupBoxStyle(POSPanelGroupBoxStyle())
+    }
+
+    private func sendReceipt() {
+        guard !isSendingReceipt else {
+            return
+        }
+
+        let normalizedEmail = receiptEmail.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedEmail.contains("@"), normalizedEmail.contains(".") else {
+            receiptErrorMessage = "Enter a valid email address."
+            receiptStatusMessage = nil
+            return
+        }
+
+        isSendingReceipt = true
+        receiptStatusMessage = nil
+        receiptErrorMessage = nil
+        Task {
+            do {
+                try await viewModel.sendReceiptEmail(
+                    referenceId: transaction.id,
+                    referenceKind: transaction.channel == "cash" ? .cashOrder : .stripeTerminal,
+                    email: normalizedEmail
+                )
+                await MainActor.run {
+                    isSendingReceipt = false
+                    receiptEmail = normalizedEmail
+                    receiptStatusMessage = "Receipt sent to \(normalizedEmail)."
+                }
+            } catch {
+                await MainActor.run {
+                    isSendingReceipt = false
+                    receiptErrorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func refundTransaction() {
+        refundStatusMessage = nil
+        refundErrorMessage = nil
+
+        Task {
+            do {
+                try await viewModel.refundTransaction(
+                    transaction,
+                    restock: restock,
+                    reason: refundReason,
+                    note: refundNote,
+                    confirmAction: refundConfirmation,
+                    period: period
+                )
+                await MainActor.run {
+                    refundStatusMessage = restock ? "Refund recorded and stock returned." : "Refund recorded without restock."
+                    refundConfirmation = ""
+                }
+            } catch {
+                await MainActor.run {
+                    refundErrorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+}
+
+private extension POSTransaction {
+    var paymentLabel: String {
+        channel == "cash" ? "Cash" : "Card"
+    }
+
+    var statusLabel: String {
+        if status == "refunded" {
+            return "Refunded"
+        }
+        if status == "canceled" {
+            return "Canceled"
+        }
+        return "Paid"
+    }
+
+    var formattedTotal: String {
+        guard let amountTotal else {
+            return "-"
+        }
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencyCode = (currency ?? "usd").uppercased()
+        return formatter.string(from: NSNumber(value: Double(amountTotal) / 100.0)) ?? "$0.00"
+    }
+
+    var formattedCreated: String {
+        let date = Date(timeIntervalSince1970: TimeInterval(created))
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    var primaryItemTitle: String {
+        items.first?.title ?? "POS Transaction"
+    }
+
+    var itemSummary: String {
+        guard !items.isEmpty else {
+            return "No line items"
+        }
+        return items
+            .map { "\($0.title) x\($0.quantity)" }
+            .joined(separator: ", ")
     }
 }
 

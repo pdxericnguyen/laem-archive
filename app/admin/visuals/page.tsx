@@ -10,6 +10,7 @@ import {
   type SiteVisual,
   type SiteVisualPlacement
 } from "@/lib/site-visuals";
+import { formatDateTimeInLaemTime } from "@/lib/laem-time";
 
 export const metadata = { title: "Site Visuals | LAEM Archive" };
 export const dynamic = "force-dynamic";
@@ -61,12 +62,7 @@ function formatUpdatedAt(value: number | undefined) {
   if (!value) {
     return "Not saved yet";
   }
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(new Date(value));
+  return formatDateTimeInLaemTime(value);
 }
 
 function buildInitialPayload(placement: SiteVisualPlacement, visual: SiteVisual | null): VisualPayload {

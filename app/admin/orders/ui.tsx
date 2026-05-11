@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { getAdminQueueButtonClass } from "@/lib/admin-ui";
+import { formatUnixInLaemTime } from "@/lib/laem-time";
 
 type OrderStatus =
   | "paid"
@@ -167,7 +168,7 @@ function formatDate(unix?: number | null) {
   if (!unix) {
     return "-";
   }
-  return new Date(unix * 1000).toLocaleString();
+  return formatUnixInLaemTime(unix);
 }
 
 function formatMoney(amountTotal?: number | null, currency?: string | null) {

@@ -1,4 +1,5 @@
 import type { OrderRecord } from "@/lib/orders";
+import { formatUnixInLaemTime } from "@/lib/laem-time";
 
 function escapePdfText(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
@@ -88,11 +89,7 @@ function buildSinglePagePdf(contentStream: string) {
 }
 
 function formatDate(unix: number) {
-  return new Date(unix * 1000).toLocaleString("en-US", {
-    timeZone: "America/Los_Angeles",
-    dateStyle: "medium",
-    timeStyle: "short"
-  });
+  return formatUnixInLaemTime(unix);
 }
 
 function buildShippingAddressLines(order: OrderRecord) {

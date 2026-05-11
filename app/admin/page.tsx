@@ -3,6 +3,7 @@ import AdminSystemHealthBanner from "./system-health-banner";
 import { hasKvEnv, key, kv } from "@/lib/kv";
 import { readOrder, type OrderRecord } from "@/lib/orders";
 import { getLowStockThreshold, getStock, summarizeReservationHoldsForSlugs } from "@/lib/inventory";
+import { getTodayLaemDateRangeUnix } from "@/lib/laem-time";
 
 export const metadata = { title: "Admin | LAEM Archive" };
 export const dynamic = "force-dynamic";
@@ -36,9 +37,8 @@ async function getDashboardStats() {
     };
   }
 
-  const now = new Date();
-  const startOfDayLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfDayUnix = Math.floor(startOfDayLocal.getTime() / 1000);
+  const todayRange = getTodayLaemDateRangeUnix();
+  const startOfDayUnix = todayRange?.startUnix || Math.floor(Date.now() / 1000);
 
   const orderIds = (await kv.lrange<string>(key.ordersIndex, 0, 399)) || [];
   const orders = (await Promise.all(orderIds.map((id) => readOrder(id)))).filter(

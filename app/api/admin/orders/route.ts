@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { listOrdersPage } from "@/lib/orders";
 import type { OrderQueueFilter, OrderStatusFilter, StripeObjectType } from "@/lib/orders";
+import { getLaemDateRangeUnix } from "@/lib/laem-time";
 import { requireAdminOrThrow } from "@/lib/require-admin";
 
 function getStripeDashboardUrl(
@@ -52,10 +53,12 @@ export async function GET(req: Request) {
       : "all";
   const fromParam = url.searchParams.get("from");
   const toParam = url.searchParams.get("to");
-  const fromUnix = fromParam ? Math.floor(new Date(`${fromParam}T00:00:00Z`).getTime() / 1000) : null;
-  const toUnix = toParam ? Math.floor(new Date(`${toParam}T23:59:59Z`).getTime() / 1000) : null;
+  const fromRange = fromParam ? getLaemDateRangeUnix(fromParam) : null;
+  const toRange = toParam ? getLaemDateRangeUnix(toParam) : null;
+  const fromUnix = fromRange?.startUnix ?? null;
+  const toUnix = toRange?.endUnix ?? null;
 
-  if ((fromParam && !Number.isFinite(fromUnix ?? NaN)) || (toParam && !Number.isFinite(toUnix ?? NaN))) {
+  if ((fromParam && !fromRange) || (toParam && !toRange)) {
     return NextResponse.json({ ok: false, error: "Invalid date filter" }, { status: 400 });
   }
   if (typeof fromUnix === "number" && typeof toUnix === "number" && fromUnix > toUnix) {

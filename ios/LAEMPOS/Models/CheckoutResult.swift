@@ -26,25 +26,46 @@ enum CheckoutResult: Identifiable, Equatable {
 
     var title: String {
         switch self {
-        case .success:
-            return "Payment Complete"
+        case let .success(_, _, storedOffline, _, receiptKind):
+            if storedOffline {
+                return "Payment Saved Offline"
+            }
+            if receiptKind == .cashOrder {
+                return "Cash Sale Recorded"
+            }
+            return "Card Payment Approved"
         case .failure:
-            return "Payment Failed"
+            return "Payment Not Completed"
         }
     }
 
     var message: String {
         switch self {
-        case let .success(reference, amountText, storedOffline, _, receiptKind):
+        case let .success(_, amountText, storedOffline, _, receiptKind):
             if storedOffline {
-                return "Stored \(amountText) on this device. Local reference: \(reference). Bring the iPad back online so Stripe can forward the payment."
+                return "Card payment for \(amountText) was saved on this iPad. Reconnect to the internet so Stripe can forward it."
             }
             if receiptKind == .cashOrder {
-                return "Recorded \(amountText) cash sale. Order reference: \(reference)."
+                return "Cash sale for \(amountText) is recorded. Inventory and admin order history are updated."
             }
-            return "Charged \(amountText). Stripe reference: \(reference)."
+            return "Card payment for \(amountText) was approved."
         case let .failure(message):
             return message
+        }
+    }
+
+    var referenceCaption: String? {
+        switch self {
+        case let .success(reference, _, storedOffline, _, receiptKind):
+            if storedOffline {
+                return "Offline Ref: \(reference)"
+            }
+            if receiptKind == .cashOrder {
+                return "Order Ref: \(reference)"
+            }
+            return "Stripe Ref: \(reference)"
+        case .failure:
+            return nil
         }
     }
 }

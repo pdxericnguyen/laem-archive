@@ -1,3 +1,5 @@
+import { formatNowInLaemTime } from "@/lib/laem-time";
+
 export function orderReceivedText() {
   return [
     "Your order has been received.",
@@ -95,10 +97,7 @@ export function cashReceiptText(args: {
   const total = formatCurrency(args.amountTotal, args.currency);
   const normalizedItems = normalizeCashReceiptItems(args.items);
   const showOrderReference = process.env.NODE_ENV !== "production";
-  const issuedAt = new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date());
+  const issuedAt = formatNowInLaemTime();
 
   const lines = [
     "LAEM Archive Cash Receipt",
@@ -130,10 +129,7 @@ export function cashReceiptHtml(args: CashReceiptTemplateArgs) {
   const total = formatCurrency(args.amountTotal, args.currency);
   const normalizedItems = normalizeCashReceiptItems(args.items);
   const showOrderReference = process.env.NODE_ENV !== "production";
-  const issuedAt = new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date());
+  const issuedAt = formatNowInLaemTime();
   const itemRows =
     normalizedItems.length > 0
       ? normalizedItems

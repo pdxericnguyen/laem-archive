@@ -7,6 +7,7 @@ import AdminSystemHealthBanner from "../system-health-banner";
 import UnsavedChangesGuard from "../unsaved-changes-guard";
 import BulkStockEditor from "./stock-bulk";
 import ImageUploadField from "./image-upload-field";
+import { formatUnixInLaemTime } from "@/lib/laem-time";
 
 export const dynamic = "force-dynamic";
 
@@ -157,12 +158,7 @@ function parseOptionalPositiveInt(value: string | string[] | undefined) {
 }
 
 function formatHoldDeadline(expiresAt: number) {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  }).format(new Date(expiresAt * 1000));
+  return formatUnixInLaemTime(expiresAt);
 }
 
 function formatMinutesRemaining(expiresAt: number, nowMs: number) {

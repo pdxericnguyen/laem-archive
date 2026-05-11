@@ -92,6 +92,55 @@ struct SendTerminalReceiptResponse: Decodable {
     let orderEmailUpdated: Bool?
 }
 
+struct POSTransactionItem: Decodable, Equatable {
+    let slug: String
+    let title: String
+    let quantity: Int
+}
+
+struct POSTransactionRefund: Decodable, Equatable {
+    let refundId: String?
+    let amount: Int?
+    let currency: String?
+    let reason: String?
+    let restocked: Bool?
+    let refundedAt: Int?
+    let note: String?
+}
+
+struct POSTransaction: Decodable, Identifiable, Equatable {
+    let id: String
+    let channel: String
+    let status: String
+    let created: Int
+    let amountTotal: Int?
+    let currency: String?
+    let email: String?
+    let quantity: Int?
+    let items: [POSTransactionItem]
+    let refund: POSTransactionRefund?
+}
+
+struct POSTransactionsResponse: Decodable {
+    let ok: Bool
+    let period: String
+    let rows: [POSTransaction]
+}
+
+struct POSRefundPayload: Encodable {
+    let orderId: String
+    let restock: Bool
+    let reason: String
+    let note: String
+    let confirmAction: String
+}
+
+struct POSRefundResponse: Decodable {
+    let ok: Bool
+    let already: Bool?
+    let refund: POSTransactionRefund?
+}
+
 struct TerminalConnectionTokenResponse: Decodable {
     let ok: Bool
     let secret: String
@@ -278,6 +327,33 @@ final class APIClient: @unchecked Sendable {
     func sendCashReceiptEmail(orderId: String, email: String) async throws -> SendCashReceiptResponse {
         let payload = SendCashReceiptPayload(orderId: orderId, email: email)
         var request = try makeRequest(path: "api/pos/cash-receipt", method: "POST")
+        request.httpBody = try JSONEncoder().encode(payload)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        return try await send(request)
+    }
+
+    func fetchPOSTransactions(period: String) async throws -> [POSTransaction] {
+        let safePeriod = period == "week" ? "week" : "today"
+        let request = try makeRequest(path: "api/pos/transactions?period=\(safePeriod)&limit=60", method: "GET")
+        let response: POSTransactionsResponse = try await send(request)
+        return response.rows
+    }
+
+    func refundPOSTransaction(
+        orderId: String,
+        restock: Bool,
+        reason: String,
+        note: String,
+        confirmAction: String
+    ) async throws -> POSRefundResponse {
+        let payload = POSRefundPayload(
+            orderId: orderId,
+            restock: restock,
+            reason: reason,
+            note: note,
+            confirmAction: confirmAction
+        )
+        var request = try makeRequest(path: "api/pos/refund", method: "POST")
         request.httpBody = try JSONEncoder().encode(payload)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         return try await send(request)

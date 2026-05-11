@@ -17,10 +17,14 @@ final class POSViewModel: ObservableObject {
     @Published private(set) var isLoadingProducts = false
     @Published private(set) var isCharging = false
     @Published private(set) var isRecordingCashSale = false
+    @Published private(set) var isLoadingTransactions = false
+    @Published private(set) var isRefundingTransaction = false
     @Published private(set) var isAuthenticating = false
+    @Published private(set) var transactions: [POSTransaction] = []
     @Published private(set) var isAuthenticated: Bool
     @Published var notice: Notice?
     @Published var checkoutResult: CheckoutResult?
+    @Published var transactionErrorMessage: String?
     @Published var staffPasscode = ""
     @Published var authErrorMessage: String?
     @Published var showReaderSheet = false
@@ -249,14 +253,15 @@ final class POSViewModel: ObservableObject {
             )
             clearCart()
             let refreshError = await refreshProductsSilently()
+            await loadTransactions(period: "today", silent: true)
             notice = Notice(
                 style: terminalResult.storedOffline || refreshError != nil ? .warning : .info,
                 message: refreshError.map {
-                    "Payment completed, but the catalog could not refresh. \($0)"
+                    "Card payment completed, but the live catalog did not refresh. \($0)"
                 } ?? (
                     terminalResult.storedOffline
-                        ? "Payment stored on this device. Reconnect to the internet so Stripe can forward it."
-                        : "Payment completed successfully. Catalog refreshed."
+                        ? "Card payment stored on this iPad. Reconnect to the internet so Stripe can forward it."
+                        : "Card payment completed. Catalog refreshed."
                 )
             )
         } catch {
@@ -314,11 +319,12 @@ final class POSViewModel: ObservableObject {
             )
             clearCart()
             let refreshError = await refreshProductsSilently()
+            await loadTransactions(period: "today", silent: true)
             notice = Notice(
                 style: refreshError == nil ? .info : .warning,
                 message: refreshError.map {
-                    "Cash sale recorded, but the catalog could not refresh. \($0)"
-                } ?? "Cash sale recorded. Catalog refreshed."
+                    "Cash sale recorded, but the live catalog did not refresh. \($0)"
+                } ?? "Cash sale recorded. Inventory and catalog refreshed."
             )
         } catch {
             if let apiError = error as? APIClientError, apiError == .unauthorized {
@@ -328,6 +334,82 @@ final class POSViewModel: ObservableObject {
             _ = await refreshProductsSilently()
             checkoutResult = .failure(message: error.localizedDescription)
             notice = Notice(style: .error, message: error.localizedDescription)
+        }
+    }
+
+    func loadTransactions(period: String = "today", silent: Bool = false) async {
+        guard !requiresAuthentication else {
+            transactions = []
+            return
+        }
+
+        guard let apiClient else {
+            transactionErrorMessage = "Set LAEMAPIBaseURL before viewing transactions."
+            return
+        }
+
+        if !silent {
+            isLoadingTransactions = true
+            transactionErrorMessage = nil
+        }
+        defer {
+            if !silent {
+                isLoadingTransactions = false
+            }
+        }
+
+        do {
+            transactions = try await apiClient.fetchPOSTransactions(period: period)
+        } catch {
+            if let apiError = error as? APIClientError, apiError == .unauthorized {
+                handleUnauthorizedSession()
+                return
+            }
+            transactionErrorMessage = error.localizedDescription
+        }
+    }
+
+    func refundTransaction(
+        _ transaction: POSTransaction,
+        restock: Bool,
+        reason: String,
+        note: String,
+        confirmAction: String,
+        period: String
+    ) async throws {
+        guard !requiresAuthentication else {
+            authErrorMessage = "Sign in before refunding a transaction."
+            throw APIClientError.unauthorized
+        }
+
+        guard let apiClient else {
+            throw APIClientError.server(message: "Set LAEMAPIBaseURL before refunding transactions.")
+        }
+
+        isRefundingTransaction = true
+        defer { isRefundingTransaction = false }
+
+        do {
+            _ = try await apiClient.refundPOSTransaction(
+                orderId: transaction.id,
+                restock: restock,
+                reason: reason,
+                note: note,
+                confirmAction: confirmAction
+            )
+            await loadTransactions(period: period, silent: true)
+            let refreshError = await refreshProductsSilently()
+            notice = Notice(
+                style: refreshError == nil ? .info : .warning,
+                message: refreshError.map {
+                    "Refund recorded, but the live catalog did not refresh. \($0)"
+                } ?? "Refund recorded. Inventory and transactions refreshed."
+            )
+        } catch {
+            if let apiError = error as? APIClientError, apiError == .unauthorized {
+                handleUnauthorizedSession()
+            }
+            throw error
         }
     }
 
@@ -366,6 +448,7 @@ final class POSViewModel: ObservableObject {
             style: .info,
             message: "Receipt email saved for \(normalizedEmail)."
         )
+        await loadTransactions(period: "today", silent: true)
     }
 
     private func saveCachedProducts(_ products: [Product]) {

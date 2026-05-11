@@ -52,7 +52,7 @@ struct OrderResultView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 18) {
-                Text("ORDER STATUS")
+                Text("SALE STATUS")
                     .font(.caption.weight(.semibold))
                     .tracking(1.4)
                     .foregroundStyle(POSBrand.textSecondary)
@@ -68,6 +68,22 @@ struct OrderResultView: View {
                 Text(result.message)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(POSBrand.textSecondary)
+
+                if let referenceCaption = result.referenceCaption {
+                    Text(referenceCaption)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(POSBrand.textSecondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(POSBrand.cardBackground)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(POSBrand.cardBorder, lineWidth: 1)
+                        )
+                }
 
                 if shouldShowReceiptInput {
                     receiptForm
@@ -88,15 +104,15 @@ struct OrderResultView: View {
     @ViewBuilder
     private var receiptForm: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Send receipt")
+            Text("Email receipt")
                 .font(.headline)
                 .foregroundStyle(POSBrand.textPrimary)
 
-            Text("Ask for the customer email after payment. If they do not want a receipt, leave this blank and tap Done.")
+            Text("Optional: enter the customer email to send a receipt. Leave blank and tap Done to skip.")
                 .font(.footnote)
                 .foregroundStyle(POSBrand.textSecondary)
 
-            TextField("Customer email", text: $receiptEmail)
+            TextField("name@email.com", text: $receiptEmail)
                 .textInputAutocapitalization(.never)
                 .keyboardType(.emailAddress)
                 .autocorrectionDisabled()
@@ -121,7 +137,7 @@ struct OrderResultView: View {
                     ProgressView()
                         .frame(maxWidth: .infinity)
                 } else {
-                    Text(receiptStatusMessage == nil ? "Send Receipt" : "Update Receipt Email")
+                    Text(receiptStatusMessage == nil ? "Send Receipt Email" : "Update Receipt Email")
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -180,7 +196,7 @@ struct OrderResultView: View {
                 await MainActor.run {
                     isSendingReceipt = false
                     receiptEmail = normalizedEmail
-                    receiptStatusMessage = "Receipt email saved for \(normalizedEmail)."
+                    receiptStatusMessage = "Receipt sent to \(normalizedEmail)."
                 }
             } catch {
                 await MainActor.run {
